@@ -1,0 +1,96 @@
+# .cursorrules — DPM-3D (Diffusion Probabilistic Models for 3D Point Cloud Generation)
+
+## Project Purpose
+
+Personal paper-reading companion repo: simplified PyTorch implementations for understanding data flow and architecture correspondence to the original paper. NOT for production use.
+
+Paper: Luo & Hu, "Diffusion Probabilistic Models for 3D Point Cloud Generation", CVPR 2021
+Source reference repo: `/home/eliosilver/Github_Projects/diffusion-point-cloud` (read for understanding, do NOT copy-paste)
+Detailed study notes: `notes.md`
+
+## Learner Context (CRITICAL — read before every response)
+
+This is the user's **first paper reproduction project**. They are a **3D CV beginner** (planning 3+ years in this field). Key implications:
+
+- **Never skip "why"**: before writing code for any component, briefly explain what it does conceptually and why it's designed that way. Link to the relevant paper section or equation.
+- **Never assume 3DCV prior knowledge**: terms like "point cloud normalization", "shape latent", "Chamfer distance", or domain-specific engineering choices (e.g. why Conv1d over Conv2d for point clouds) must be explained when they first appear.
+- **Step-by-step, one block at a time**: implement one self-contained component per session. Do NOT write the entire model at once. After each component, suggest a minimal test to verify it works before proceeding.
+- **Teach PyTorch engineering patterns as they arise**: e.g., why `log_var` instead of `sigma`, what `register_buffer` does, why gradients are detached in certain places, etc.
+- **"复现" not "跑通"**: the goal is independent reimplementation from the paper, using the reference repo only as a sanity check (never to copy code). Code should feel like annotated pseudocode that makes the paper tangible.
+- **This is a long-term skill-building exercise**: correctness and understanding matter more than speed. It's fine to take 1-2 sessions just to understand and test a single module.
+
+## Implementation Philosophy
+
+- **Readability over performance**: code should read like annotated pseudocode corresponding to the paper.
+- **Thorough comments**: every layer, forward pass step, and loss computation must document input/output tensor shapes and semantic meaning. Example:
+  ```python
+  # Encode input to latent distribution parameters
+  # x: (batch_size, 784) -> mu: (batch_size, latent_dim), log_var: (batch_size, latent_dim)
+  ```
+- **Minimal and self-contained**: avoid deep abstraction hierarchies. Each file should be understandable on its own.
+- **Reference the paper**: cite equation numbers at key steps (e.g., `# Eq. (13): one-step forward sampling`), but shape/semantics comments take priority.
+
+## Tech Stack
+
+- Python 3, PyTorch (torch, torchvision)
+- Minimal dependencies: numpy, matplotlib
+- No custom training frameworks — plain training loops with `torch.optim`
+
+## Architecture Overview
+
+### Core Components (in implementation order)
+
+1. **VarianceSchedule** — Linear beta schedule from β_1 to β_T, precomputes α, α_bar, sigma variants
+2. **ConcatSquashLinear** — Conditional linear layer: `Linear(x) * sigmoid(Linear_gate(ctx)) + Linear_bias(ctx)`
+3. **PointwiseNet** — 6-layer MLP noise predictor (3→128→256→512→256→128→3), processes each point independently
+   - Time embedding: [β, sin(β), cos(β)] (3-dim)
+   - Context: cat(time_emb, shape_latent_z) → (B, 1, F+3)
+   - Residual connection
+4. **DiffusionPoint** — Forward sampling via Eq.(13), noise prediction loss (MSE), reverse sampling loop
+5. **PointNetEncoder** — Conv1d(3→128→128→256→512) + MaxPool + dual-head FC → (mu, log_var)
+6. **AutoEncoder** — PointNet encoder + Diffusion decoder, no KL term
+7. **FlowVAE** — Full generative model with Normalizing Flow prior on z
+
+### Key Equations (from paper)
+
+- Forward one-step: `x_t = sqrt(α_bar_t) * x_0 + sqrt(1 - α_bar_t) * ε` — Eq.(13)
+- Loss: `MSE(ε_θ(x_t, t, z), ε)` — simplified from Eq.(9)
+- Reverse sampling: `x_{t-1} = (1/sqrt(α_t)) * (x_t - (1-α_t)/sqrt(1-α_bar_t) * ε_θ) + σ_t * z_noise`
+
+### Two Operating Modes
+
+- **AutoEncoder**: Encoder deterministic (only mu), loss = diffusion MSE. T=200, β_T=0.05
+- **Generation (FlowVAE)**: Encoder stochastic (reparameterize), loss = diffusion + KL. T=100, β_T=0.02, kl_weight=0.001
+
+## Conventions
+
+- `train.py` or `train_ae.py` / `train_gen.py` as entry points
+- `model.py` for all nn.Module definitions, each component as a separate class
+- Encoder outputs `mu` and `log_var` (NOT sigma) for numerical stability
+- Visualization / sampling scripts separate from training
+- Dataset: ShapeNet, 2048 points/shape, normalized to zero mean and unit variance
+
+## Data Flow Summary
+
+```
+[Training — AutoEncoder]
+X^(0) (B,N,3) → PointNetEncoder → z (B,F)
+                                    ↓
+t ~ Uniform{1..T}; ε ~ N(0,I)
+x^(t) = sqrt(α_bar_t) * X^(0) + sqrt(1-α_bar_t) * ε    [per point, Eq.13]
+                                    ↓
+PointwiseNet(x^(t), β_t, z) → ε_θ (B,N,3)
+Loss = MSE(ε_θ, ε)
+
+[Training — FlowVAE]
+X^(0) → PointNetEncoder → (mu, log_var) → reparameterize → z
+Loss = MSE(ε_θ, ε) + kl_weight * KL(q(z|X) || p_flow(z))
+
+[Sampling]
+z ~ prior (flow or gaussian)
+x^(T) ~ N(0,I), shape (B,N,3)
+for t = T..1:
+    ε_θ = PointwiseNet(x^(t), β_t, z)
+    x^(t-1) = (1/sqrt(α_t)) * (x^(t) - (1-α_t)/sqrt(1-α_bar_t) * ε_θ) + σ_t * noise
+return x^(0)
+```
