@@ -80,6 +80,7 @@ downloads/
 .idea/
 *.code-workspace
 pyrightconfig.json
+**/.specstory
 
 # ------------------------------
 # OS / misc
