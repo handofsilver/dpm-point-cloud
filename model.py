@@ -234,12 +234,12 @@ class PointwiseNet(nn.Module):
         # 6 层 ConcatSquashLinear，维度: 3→128→256→512→256→128→3
         self.layers = nn.ModuleList(
             [
-                ConcatSquashLinear(3, 128, ctx_dim),
-                ConcatSquashLinear(128, 256, ctx_dim),
-                ConcatSquashLinear(256, 512, ctx_dim),
-                ConcatSquashLinear(512, 256, ctx_dim),
-                ConcatSquashLinear(256, 128, ctx_dim),
-                ConcatSquashLinear(128, 3, ctx_dim),
+                ConcatSquashLinear(in_dim=3, out_dim=128, ctx_dim=ctx_dim),
+                ConcatSquashLinear(in_dim=128, out_dim=256, ctx_dim=ctx_dim),
+                ConcatSquashLinear(in_dim=256, out_dim=512, ctx_dim=ctx_dim),
+                ConcatSquashLinear(in_dim=512, out_dim=256, ctx_dim=ctx_dim),
+                ConcatSquashLinear(in_dim=256, out_dim=128, ctx_dim=ctx_dim),
+                ConcatSquashLinear(in_dim=128, out_dim=3, ctx_dim=ctx_dim),
             ]
         )
 
@@ -294,3 +294,156 @@ class PointwiseNet(nn.Module):
         if self.residual:
             return x + h  # (B, N, 3)
         return h  # (B, N, 3)
+
+
+# =============================================================================
+# Phase 2: DiffusionPoint
+# 作用: 扩散过程的调度器——训练时加噪+算损失，推理时逐步去噪
+# 对应论文: Section 4.1, Algorithm 1 (训练), Algorithm 2 (采样)
+# =============================================================================
+
+
+class DiffusionPoint(nn.Module):
+    """
+    扩散过程的核心调度模块。
+
+    持有 VarianceSchedule（噪声系数表）和 PointwiseNet（噪声预测网络），
+    对外只暴露两个方法：
+        - get_loss(x0, z) → 训练损失（标量）
+        - sample(z)       → 生成点云 (B, N, 3)
+    """
+
+    def __init__(
+        self,
+        net: PointwiseNet,  # 噪声预测网络（已构建好的实例）
+        var_sched: VarianceSchedule,  # 噪声系数表（已构建好的实例）
+    ):
+        super().__init__()
+        self.net = net
+        self.var_sched = var_sched
+
+    # -------------------------------------------------------------------------
+    # 训练接口
+    # -------------------------------------------------------------------------
+
+    def get_loss(
+        self,
+        x0: torch.Tensor,  # (B, N, 3)  干净点云
+        z: torch.Tensor,  # (B, F)     shape latent（来自 PointNetEncoder）
+    ) -> torch.Tensor:
+        """
+        前向加噪 + 预测噪声 + 返回 MSE 损失。
+        对应 Algorithm 1（训练循环的单次迭代）。
+
+        Returns:
+            loss: 标量 Tensor，MSE(ε_θ, ε)
+        """
+        B, N, _ = x0.shape
+
+        # --- TODO 1: 随机采样时间步 t ---
+        # 从 {1, 2, ..., T} 中均匀采 B 个整数（每个样本一个不同的 t）
+        # 提示: 用 var_sched.uniform_sample_t(B)
+        # 结果 shape: (B,)，dtype=torch.long
+        
+        t = self.var_sched.uniform_sample_t(B) 
+
+        # --- TODO 2: 取出当前时间步的 alpha_bar_t 和 beta_t ---
+        # 注意: t 是 1-indexed，var_sched 的数组是 0-indexed
+        # 所以数组下标 = t - 1
+        # 结果 shape: (B,)
+        alpha_bar = self.var_sched.alpha_bars  # TODO 2a：从 var_sched.alpha_bars 取出
+        beta = self.var_sched.betas  # TODO 2b：从 var_sched.betas 取出
+
+        # --- TODO 3: 采样噪声 ε ~ N(0, I) ---
+        # shape 与 x0 完全相同: (B, N, 3)
+        # 提示: torch.randn_like(x0)
+        eps = ...  # TODO 3
+
+        # --- TODO 4: 一步前向加噪（Eq.13）---
+        # x^(t) = sqrt(alpha_bar_t) * x0 + sqrt(1 - alpha_bar_t) * ε
+        # 注意广播：alpha_bar shape 是 (B,)，x0 shape 是 (B, N, 3)
+        # 需要把 alpha_bar 变成 (B, 1, 1) 才能正确广播
+        # 提示: alpha_bar.view(B, 1, 1)
+        x_noisy = ...  # TODO 4
+
+        # --- TODO 5: 调用 PointwiseNet 预测噪声 ---
+        # 输入: x_noisy (B, N, 3), beta (B,), z (B, F)
+        # 输出: eps_pred (B, N, 3)
+        # 注意: beta 也需要和 alpha_bar 一样做广播吗？
+        # 不需要！beta 直接传入 PointwiseNet，内部会处理
+        eps_pred = ...  # TODO 5
+
+        # --- TODO 6: 计算并返回 MSE 损失 ---
+        # loss = mean((eps_pred - eps)^2)
+        # 提示: nn.functional.mse_loss，或者手写都行
+        loss = ...  # TODO 6
+        return loss
+
+    # -------------------------------------------------------------------------
+    # 推理接口
+    # -------------------------------------------------------------------------
+
+    def sample(
+        self,
+        z: torch.Tensor,  # (B, F)  shape latent（来自先验或 encoder）
+        num_points: int,  # N，生成点云的点数（通常 2048）
+        flexibility: float,  # σ 插值系数，0=窄方差，1=宽方差
+    ) -> torch.Tensor:
+        """
+        逆向 Markov chain，从纯噪声逐步去噪，生成点云。
+        对应 Algorithm 2。
+
+        Returns:
+            x: (B, N, 3) 生成的点云
+        """
+        B = z.shape[0]
+
+        # --- TODO 7: 初始化 x^(T) ~ N(0, I) ---
+        # 从标准正态分布采样，shape: (B, num_points, 3)
+        # 注意需要与 z 在同一个 device 上
+        # 提示: torch.randn(B, num_points, 3, device=z.device)
+        x = ...  # TODO 7
+
+        # --- TODO 8: 逆向循环 t = T, T-1, ..., 1 ---
+        # 提示: range(self.var_sched.T, 0, -1) 生成 T, T-1, ..., 1
+        for t_int in ...:  # TODO 8：填入正确的 range
+
+            # --- TODO 9: 把当前时间步组装成 batch tensor ---
+            # 需要一个 shape (B,) 的张量，每个元素都等于 t_int
+            # 提示: torch.full((B,), t_int, dtype=torch.long, device=z.device)
+            t = ...  # TODO 9
+
+            # --- TODO 10: 取出当前时间步的系数 ---
+            # 需要: alpha_t, alpha_bar_t, beta_t
+            # 下标 = t_int - 1（0-indexed）
+            # shape 都是 (B,) 或者标量都可以（这里用标量更简单）
+            alpha = self.var_sched.alphas[t_int - 1]  # 标量
+            alpha_bar = self.var_sched.alpha_bars[t_int - 1]  # 标量
+            beta = self.var_sched.betas[t_int - 1]  # 标量
+
+            # sigma 用 get_sigmas 方法，需要 (B,) 的 t
+            sigma = ...  # TODO 10：调用 var_sched.get_sigmas(t, flexibility)
+
+            # --- TODO 11: 调用 PointwiseNet 预测当前步的噪声 ---
+            # 注意：这里的 beta 是标量，但 PointwiseNet 期望 (B,)
+            # 提示: beta.expand(B) 或 beta.repeat(B) 或 torch.full((B,), beta, ...)
+            # 另外这里不需要计算梯度（推理阶段），可以包在 torch.no_grad() 里吗？
+            # → 不需要，由调用方决定；但 PointwiseNet forward 不改变图结构，直接调用即可
+            beta_batch = ...  # TODO 11a：把标量 beta 扩展为 (B,)
+            eps_pred = ...  # TODO 11b：调用 self.net
+
+            # --- TODO 12: 逆向均值（去噪一步）---
+            # 公式: x_{t-1} = (1/sqrt(α_t)) * (x_t - (1-α_t)/sqrt(1-α_bar_t) * ε_θ)
+            # 注意：这里 alpha, alpha_bar 都是标量，x 是 (B, N, 3)，可以直接乘
+            # 提示: import math; math.sqrt(alpha) 或 alpha.sqrt()（Tensor 有 .sqrt()）
+            x = ...  # TODO 12
+
+            # --- TODO 13: 加回随机性（最后一步 t=1 不加）---
+            # if t_int > 1:
+            #     噪声 z_noise ~ N(0, I)，shape 与 x 相同
+            #     x = x + sigma * z_noise
+            # TODO 13
+            ...
+
+        # 循环结束，x 即为 x^(0)，即生成的点云
+        return x  # (B, N, 3)

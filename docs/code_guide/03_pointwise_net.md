@@ -9,8 +9,9 @@
 
 给定加噪后的点云 $x^{(t)}$、当前时间步的噪声强度 $\beta_t$、以及 shape latent $z$，预测出每个点上的噪声 $\hat\varepsilon$：
 
-$$\hat\varepsilon = \varepsilon_\theta(x^{(t)},\ \beta_t,\ z) \quad \in \mathbb{R}^{B \times N \times 3}$$
-
+$$
+\hat\varepsilon = \varepsilon_\theta(x^{(t)},\ \beta_t,\ z) \quad \in \mathbb{R}^{B \times N \times 3}
+$$
 训练目标：让 $\hat\varepsilon$ 尽量接近真实噪声 $\varepsilon$（MSE 损失）。
 
 **关键特点**：每个点**独立处理**，点之间的信息仅通过共享的 $z$ 间接交互。这也是"Pointwise"命名的原因。
