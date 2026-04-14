@@ -61,8 +61,8 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 | # | 组件 | 文件 | 测试 | 文档 | 状态 |
 |---|---|---|---|---|---|
-| 2-A | `DiffusionPoint.get_loss` | `model.py` | `tests/test_diffusion_point.py` | `docs/code_guide/04_diffusion_point.md` | 🔲 待实现 |
-| 2-B | `DiffusionPoint.sample` | `model.py` | （同上） | （同上） | 🔲 待实现 |
+| 2-A | `DiffusionPoint.get_loss` | `model.py` | `tests/test_diffusion_point.py` | `docs/code_guide/04_diffusion_point.md` | ✅ 完成 |
+| 2-B | `DiffusionPoint.sample` | `model.py` | （同上） | （同上） | ✅ 完成 |
 
 **关键概念**：
 - `get_loss`：对应 Algorithm 1，一步前向加噪（Eq.13）+ MSE 损失

@@ -73,6 +73,18 @@ Each subdirectory contains the original paper PDF. Implementation should treat t
 - Encoder 输出 mu 和 log_var（不是 sigma），与 VAE 目录一致
 - 优化器: Adam，梯度裁剪 max_norm=10，线性 LR 衰减
 
+## Collaboration Mode: Scaffold → Fill-in → Review
+
+当前阶段的协作方式（可随学习进展调整）：
+
+1. **概念讲解**：AI 先解释下一个组件的原理和设计动机
+2. **脚手架**：AI 在 `model.py` 中写好类/方法签名、注释、TODO 占位，不写实现
+   - 每个 TODO 粒度尽量小（单一职责），包含输入输出 shape 提示
+   - 从简单模式（如 `get_loss`）做起，再写复杂模式（如 `sample`）
+3. **用户填写**：用户根据注释提示尝试实现
+4. **诊断修改**：AI 审查用户代码，指出 bug 和非最佳实践，修改为正式版
+5. **文档收尾**：AI 撰写 `docs/code_guide/` 导读 + 更新 `roadmap.md`
+
 ## Conventions
 
 - Training scripts: `train.py` as entry point
