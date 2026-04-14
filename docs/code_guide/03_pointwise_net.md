@@ -25,15 +25,15 @@ $$
       β_t    (B,)
       z      (B, zdim)
 
-① 时间嵌入: [β_t, sin(β_t), cos(β_t)] → (B, 1, 3)
+1 时间嵌入: [β_t, sin(β_t), cos(β_t)] → (B, 1, 3)
 
-② 条件向量: ctx = cat([time_emb, z]) → (B, 1, 3+zdim)
+2 条件向量: ctx = cat([time_emb, z]) → (B, 1, 3+zdim)
 
-③ 6 层 ConcatSquashLinear:
+3 6 层 ConcatSquashLinear:
    3 →[LeakyReLU]→ 128 →[LeakyReLU]→ 256 →[LeakyReLU]→ 512
      →[LeakyReLU]→ 256 →[LeakyReLU]→ 128 →            → 3
 
-④ 残差: output = h + x^(t)
+4 残差: output = h + x^(t)
 
 输出: ε_θ  (B, N, 3)
 ```
@@ -47,7 +47,7 @@ $$
 网络需要感知"当前噪声强度"，有两种选择：
 
 | 方案 | 维度 | 设计思路 |
-|---|---|---|
+|:-:|:-:|:-:|
 | DDPM：正弦位置编码 | 128 维 | $t$ 的多频率 sin/cos 指纹，适合 UNet 多尺度结构 |
 | 本论文：直接嵌入 $\beta_t$ | **3 维** | $\beta_t$ 本身就是语义信息（噪声强度），sin/cos 补充非线性特征 |
 

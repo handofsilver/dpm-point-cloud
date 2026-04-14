@@ -5,7 +5,7 @@ Paper: Luo & Hu, "Diffusion Probabilistic Models for 3D Point Cloud Generation",
 
 import torch
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 # =============================================================================
 # Phase 1-A: VarianceSchedule
@@ -268,9 +268,8 @@ class PointwiseNet(nn.Module):
                 torch.cos(beta_col),
             ],
             dim=-1,
-        ).unsqueeze(
-            1
-        )  # (B, 1, 3)
+        ).unsqueeze(1)
+        # (B, 1, 3)
 
         # --- Step 2: 构造条件向量 ctx ---
         # z: (B, zdim) → unsqueeze 到 (B, 1, zdim)
@@ -340,43 +339,34 @@ class DiffusionPoint(nn.Module):
         """
         B, N, _ = x0.shape
 
-        # --- TODO 1: 随机采样时间步 t ---
-        # 从 {1, 2, ..., T} 中均匀采 B 个整数（每个样本一个不同的 t）
-        # 提示: 用 var_sched.uniform_sample_t(B)
-        # 结果 shape: (B,)，dtype=torch.long
-        
-        t = self.var_sched.uniform_sample_t(B) 
+        # --- Step 1: 随机采样时间步 t ---
+        # 每个样本独立采一个 t ∈ {1, ..., T}
+        # t: (B,)，1-indexed
+        t = self.var_sched.uniform_sample_t(B)
 
-        # --- TODO 2: 取出当前时间步的 alpha_bar_t 和 beta_t ---
-        # 注意: t 是 1-indexed，var_sched 的数组是 0-indexed
-        # 所以数组下标 = t - 1
-        # 结果 shape: (B,)
-        alpha_bar = self.var_sched.alpha_bars  # TODO 2a：从 var_sched.alpha_bars 取出
-        beta = self.var_sched.betas  # TODO 2b：从 var_sched.betas 取出
+        # --- Step 2: 取出当前时间步的系数 ---
+        # t 是 1-indexed，数组是 0-indexed，所以下标 = t - 1
+        alpha_bar = self.var_sched.alpha_bars[t - 1]  # (B,)
+        beta = self.var_sched.betas[t - 1]  # (B,)
 
-        # --- TODO 3: 采样噪声 ε ~ N(0, I) ---
-        # shape 与 x0 完全相同: (B, N, 3)
-        # 提示: torch.randn_like(x0)
-        eps = ...  # TODO 3
+        # --- Step 3: 采样噪声 ε ~ N(0, I) ---
+        eps = torch.randn_like(x0)  # (B, N, 3)
 
-        # --- TODO 4: 一步前向加噪（Eq.13）---
-        # x^(t) = sqrt(alpha_bar_t) * x0 + sqrt(1 - alpha_bar_t) * ε
-        # 注意广播：alpha_bar shape 是 (B,)，x0 shape 是 (B, N, 3)
-        # 需要把 alpha_bar 变成 (B, 1, 1) 才能正确广播
-        # 提示: alpha_bar.view(B, 1, 1)
-        x_noisy = ...  # TODO 4
+        # --- Step 4: 一步前向加噪 — Eq.(13) ---
+        # x^(t) = sqrt(α_bar_t) · x^(0) + sqrt(1 - α_bar_t) · ε
+        # alpha_bar: (B,) → view(B,1,1) 与 x0: (B,N,3) 广播
+        x_noisy = (
+            torch.sqrt(alpha_bar).view(B, 1, 1) * x0
+            + torch.sqrt(1 - alpha_bar).view(B, 1, 1) * eps
+        )  # (B, N, 3)
 
-        # --- TODO 5: 调用 PointwiseNet 预测噪声 ---
-        # 输入: x_noisy (B, N, 3), beta (B,), z (B, F)
-        # 输出: eps_pred (B, N, 3)
-        # 注意: beta 也需要和 alpha_bar 一样做广播吗？
-        # 不需要！beta 直接传入 PointwiseNet，内部会处理
-        eps_pred = ...  # TODO 5
+        # --- Step 5: 预测噪声 ---
+        # PointwiseNet 期望 beta: (B,)，这里 beta 已经是 (B,)，直接传入
+        eps_pred = self.net(x_noisy, beta, z)  # (B, N, 3)
 
-        # --- TODO 6: 计算并返回 MSE 损失 ---
-        # loss = mean((eps_pred - eps)^2)
-        # 提示: nn.functional.mse_loss，或者手写都行
-        loss = ...  # TODO 6
+        # --- Step 6: MSE 损失 ---
+        # Python 注意: ** 是幂运算，^ 是按位异或（对 float Tensor 会报错）
+        loss = F.mse_loss(eps_pred, eps)
         return loss
 
     # -------------------------------------------------------------------------
@@ -398,52 +388,35 @@ class DiffusionPoint(nn.Module):
         """
         B = z.shape[0]
 
-        # --- TODO 7: 初始化 x^(T) ~ N(0, I) ---
-        # 从标准正态分布采样，shape: (B, num_points, 3)
-        # 注意需要与 z 在同一个 device 上
-        # 提示: torch.randn(B, num_points, 3, device=z.device)
-        x = ...  # TODO 7
+        # --- Step 1: 初始化 x^(T) ~ N(0, I) ---
+        x = torch.randn(B, num_points, 3, device=z.device)  # (B, N, 3)
 
-        # --- TODO 8: 逆向循环 t = T, T-1, ..., 1 ---
-        # 提示: range(self.var_sched.T, 0, -1) 生成 T, T-1, ..., 1
-        for t_int in ...:  # TODO 8：填入正确的 range
+        # --- Step 2: 逆向循环 t = T, T-1, ..., 1 ---
+        for t_int in range(self.var_sched.T, 0, -1):
 
-            # --- TODO 9: 把当前时间步组装成 batch tensor ---
-            # 需要一个 shape (B,) 的张量，每个元素都等于 t_int
-            # 提示: torch.full((B,), t_int, dtype=torch.long, device=z.device)
-            t = ...  # TODO 9
+            # 组装 batch tensor：所有样本在同一时间步
+            t = torch.full((B,), t_int, dtype=torch.long, device=z.device)  # (B,)
 
-            # --- TODO 10: 取出当前时间步的系数 ---
-            # 需要: alpha_t, alpha_bar_t, beta_t
-            # 下标 = t_int - 1（0-indexed）
-            # shape 都是 (B,) 或者标量都可以（这里用标量更简单）
-            alpha = self.var_sched.alphas[t_int - 1]  # 标量
-            alpha_bar = self.var_sched.alpha_bars[t_int - 1]  # 标量
-            beta = self.var_sched.betas[t_int - 1]  # 标量
+            # 取出当前时间步的系数（标量 Tensor）
+            alpha = self.var_sched.alphas[t_int - 1]
+            alpha_bar = self.var_sched.alpha_bars[t_int - 1]
+            sigma = self.var_sched.get_sigmas(t, flexibility)  # (B,)
 
-            # sigma 用 get_sigmas 方法，需要 (B,) 的 t
-            sigma = ...  # TODO 10：调用 var_sched.get_sigmas(t, flexibility)
+            # 预测噪声
+            # beta 是标量 Tensor，但 PointwiseNet 期望 (B,)，需要 expand
+            beta = self.var_sched.betas[t_int - 1].expand(B)  # (B,)
+            eps_pred = self.net(x, beta, z)  # (B, N, 3)
 
-            # --- TODO 11: 调用 PointwiseNet 预测当前步的噪声 ---
-            # 注意：这里的 beta 是标量，但 PointwiseNet 期望 (B,)
-            # 提示: beta.expand(B) 或 beta.repeat(B) 或 torch.full((B,), beta, ...)
-            # 另外这里不需要计算梯度（推理阶段），可以包在 torch.no_grad() 里吗？
-            # → 不需要，由调用方决定；但 PointwiseNet forward 不改变图结构，直接调用即可
-            beta_batch = ...  # TODO 11a：把标量 beta 扩展为 (B,)
-            eps_pred = ...  # TODO 11b：调用 self.net
+            # 逆向均值（去噪一步）
+            # x_{t-1} = (1/√α_t) · (x_t − (1−α_t)/√(1−ᾱ_t) · ε_θ)
+            x = (1 / alpha.sqrt()) * (
+                x - (1 - alpha) / (1 - alpha_bar).sqrt() * eps_pred
+            )
 
-            # --- TODO 12: 逆向均值（去噪一步）---
-            # 公式: x_{t-1} = (1/sqrt(α_t)) * (x_t - (1-α_t)/sqrt(1-α_bar_t) * ε_θ)
-            # 注意：这里 alpha, alpha_bar 都是标量，x 是 (B, N, 3)，可以直接乘
-            # 提示: import math; math.sqrt(alpha) 或 alpha.sqrt()（Tensor 有 .sqrt()）
-            x = ...  # TODO 12
+            # 加回随机性（t=1 时不加，此时已经是最终输出）
+            # sigma: (B,) → view(B,1,1) 与 z_noise: (B,N,3) 广播
+            if t_int > 1:
+                z_noise = torch.randn_like(x)
+                x = x + sigma.view(B, 1, 1) * z_noise  # (B, N, 3)
 
-            # --- TODO 13: 加回随机性（最后一步 t=1 不加）---
-            # if t_int > 1:
-            #     噪声 z_noise ~ N(0, I)，shape 与 x 相同
-            #     x = x + sigma * z_noise
-            # TODO 13
-            ...
-
-        # 循环结束，x 即为 x^(0)，即生成的点云
         return x  # (B, N, 3)
