@@ -511,3 +511,74 @@ class PointNetEncoder(nn.Module):
         log_var = self.fc_log_var(feat)  # (B, 512) → (B, zdim)
 
         return mu, log_var
+
+
+# =============================================================================
+# Phase 4-A: AutoEncoder
+# 作用: 第一个端到端可训练模型——Encoder + DiffusionPoint 的封装
+# 对应论文: Section 4.3（AutoEncoder 模式）
+# =============================================================================
+
+
+class AutoEncoder(nn.Module):
+    """
+    点云 AutoEncoder。
+
+    持有 PointNetEncoder 和 DiffusionPoint，对外只暴露：
+        - get_loss(x0) → 训练损失（标量）
+        - sample(z)    → 生成点云 (B, N, 3)
+
+    AutoEncoder 模式的关键：z = mu（直接取 Encoder 输出的均值，不采样）。
+    没有 KL 项，损失完全来自扩散重建。
+    """
+
+    def __init__(
+        self,
+        encoder: PointNetEncoder,
+        diffusion: DiffusionPoint,
+    ):
+        """
+        Args:
+            encoder  : 已构建好的 PointNetEncoder 实例
+            diffusion: 已构建好的 DiffusionPoint 实例
+        """
+        super().__init__()
+
+        # encoder 和 diffusion 作为子模块注册，参数会被 optimizer 和 .to(device) 统一管理
+        self.encoder = encoder
+        self.diffusion = diffusion
+
+    def get_loss(self, x0: torch.Tensor) -> torch.Tensor:
+        """
+        编码点云 → 取 mu 作为 z → 计算扩散损失。
+
+        Args:
+            x0: (B, N, 3)  输入点云（干净，未加噪）
+
+        Returns:
+            loss: 标量 Tensor，MSE(ε_θ, ε)
+        """
+        # encoder 始终输出双头；AutoEncoder 模式只用 mu，log_var 被丢弃
+        mu, _ = self.encoder(x0)
+
+        # AutoEncoder 模式：z = mu，不采样，不引入随机性
+        z = mu
+
+        return self.diffusion.get_loss(x0, z)
+
+    def sample(
+        self,
+        z: torch.Tensor,  # (B, F)  shape latent（来自外部，或训练集编码结果）
+        num_points: int,  # 生成点数，通常 2048
+        flexibility: float,  # 方差插值系数，0=窄，1=宽
+    ) -> torch.Tensor:
+        """
+        给定 z，逆向扩散生成点云。
+
+        sample 不调用 Encoder——z 由调用方提供。
+        （重建时 z 来自 encoder(x0)；纯生成时 z 来自先验分布）
+
+        Returns:
+            x: (B, N, 3) 生成的点云
+        """
+        return self.diffusion.sample(z, num_points, flexibility)

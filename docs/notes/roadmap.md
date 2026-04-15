@@ -89,7 +89,7 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 | # | 组件 | 文件 | 测试/训练 | 文档 | 状态 |
 |---|---|---|---|---|---|
-| 4-A | `AutoEncoder` | `model.py` | `scripts/train_ae.py` | `docs/code_guide/06_autoencoder.md` | 🔲 待实现 |
+| 4-A | `AutoEncoder` | `model.py` | `scripts/train_ae.py` | `docs/code_guide/06_autoencoder.md` | ✅ 完成 |
 | 4-B | ShapeNet 数据加载 | `dataset.py` | — | — | 🔲 待实现 |
 | 4-C | 训练循环 + 可视化 | `scripts/train_ae.py` | — | — | 🔲 待实现 |
 
