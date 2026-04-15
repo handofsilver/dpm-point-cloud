@@ -75,7 +75,7 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 | # | 组件 | 文件 | 测试 | 文档 | 状态 |
 |---|---|---|---|---|---|
-| 3-A | `PointNetEncoder` | `model.py` | `tests/test_encoder.py` | `docs/code_guide/05_pointnet_encoder.md` | 🔲 待实现 |
+| 3-A | `PointNetEncoder` | `model.py` | `tests/test_encoder.py` | `docs/code_guide/05_pointnet_encoder.md` | ✅ 完成 |
 
 **关键概念**：
 - 为什么用 `Conv1d` 而不是 `Conv2d` 处理点云？（首次出现，需解释）

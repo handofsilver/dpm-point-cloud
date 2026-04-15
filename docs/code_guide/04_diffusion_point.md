@@ -23,12 +23,12 @@
 **输入**: $x^{(0)}$ `(B, N, 3)` 干净点云，$z$ `(B, F)` shape latent
 
 | 步骤 | 操作 | shape |
-|:---:|------|:-----:|
-| ① | $t \sim \text{Uniform}\{1, \ldots, T\}$ | `(B,)` |
-| ② | $\varepsilon \sim \mathcal{N}(0, I)$ | `(B, N, 3)` |
-| ③ | $x^{(t)} = \sqrt{\bar\alpha_t}\, x^{(0)} + \sqrt{1-\bar\alpha_t}\, \varepsilon$ — Eq.(13) | `(B, N, 3)` |
-| ④ | $\hat\varepsilon = \varepsilon_\theta(x^{(t)},\, \beta_t,\, z)$（调用 PointwiseNet） | `(B, N, 3)` |
-| ⑤ | $\mathcal{L} = \text{MSE}(\hat\varepsilon,\, \varepsilon)$ — Eq.(9) 简化形式 | 标量 |
+|:---:|:----:|:-----:|
+| 1 | $t \sim \text{Uniform}\{1, \ldots, T\}$ | `(B,)` |
+| 2 | $\varepsilon \sim \mathcal{N}(0, I)$ | `(B, N, 3)` |
+| 3 | $x^{(t)} = \sqrt{\bar\alpha_t}\, x^{(0)} + \sqrt{1-\bar\alpha_t}\, \varepsilon$ — Eq.(13) | `(B, N, 3)` |
+| 4 | $\hat\varepsilon = \varepsilon_\theta(x^{(t)},\, \beta_t,\, z)$（调用 PointwiseNet） | `(B, N, 3)` |
+| 5 | $\mathcal{L} = \text{MSE}(\hat\varepsilon,\, \varepsilon)$ — Eq.(9) 简化形式 | 标量 |
 
 **输出**: $\mathcal{L}$（标量）
 
@@ -66,13 +66,19 @@ torch.sqrt(alpha_bar).view(B, 1, 1) * x0
 
 **Step 1** — 初始化纯噪声：
 
-$$x^{(T)} \sim \mathcal{N}(0, I), \quad \text{shape: } (B, N, 3)$$
+$$
+x^{(T)} \sim \mathcal{N}(0, I), \quad \text{shape: } (B, N, 3)
+$$
 
 **Step 2** — 逆向循环 $t = T, T-1, \ldots, 1$：
 
-$$\hat\varepsilon = \varepsilon_\theta(x^{(t)},\, \beta_t,\, z)$$
+$$
+\hat\varepsilon = \varepsilon_\theta(x^{(t)},\, \beta_t,\, z)
+$$
 
-$$x^{(t-1)} = \frac{1}{\sqrt{\alpha_t}} \left( x^{(t)} - \frac{1 - \alpha_t}{\sqrt{1 - \bar\alpha_t}}\, \hat\varepsilon \right) + \sigma_t \cdot z_{\text{noise}} \quad \text{(if } t > 1\text{)}$$
+$$
+x^{(t-1)} = \frac{1}{\sqrt{\alpha_t}} \left( x^{(t)} - \frac{1 - \alpha_t}{\sqrt{1 - \bar\alpha_t}}\, \hat\varepsilon \right) + \sigma_t \cdot z_{\text{noise}} \quad \text{(if } t > 1\text{)}
+$$
 
 > 上式对应 DDPM 论文 Eq.(11)，其中 $\sigma_t$ 由 `flexibility` 参数在 $\sigma_t^{\text{flex}}$ 和 $\sigma_t^{\text{inflex}}$ 之间插值（见 [01_variance_schedule.md](01_variance_schedule.md)）。
 
@@ -145,7 +151,7 @@ F.mse_loss(a, b)            # 推荐：语义清晰，行为等价
 
 ## 与其他模块的关系
 
-```
+```plaintext
 DiffusionPoint
     ├── 持有 VarianceSchedule
     │       ├── alpha_bars    → get_loss: Eq.13 前向加噪
