@@ -420,3 +420,94 @@ class DiffusionPoint(nn.Module):
                 x = x + sigma.view(B, 1, 1) * z_noise  # (B, N, 3)
 
         return x  # (B, N, 3)
+
+
+# =============================================================================
+# Phase 3-A: PointNetEncoder
+# 作用: 把一朵点云压缩成 shape latent z 的分布参数 (mu, log_var)
+# 对应论文: Section 4.3, Eq.(6)(7)
+# =============================================================================
+
+
+class PointNetEncoder(nn.Module):
+    """
+    点云编码器：PointNet 风格，输出 shape latent 的分布参数。
+
+    核心思路：
+        1. 用 Conv1d(kernel=1) 对每个点独立做特征提取（等价于共享权重的 MLP）
+        2. MaxPool over N 个点 → 得到置换不变的全局特征向量
+        3. 双头 FC 输出 mu 和 log_var（而不是 sigma，数值更稳定）
+
+    为什么用 Conv1d 而不是 Linear？
+        Conv1d(in, out, kernel_size=1) 作用在 (B, C, N) 上，
+        等价于对 N 个位置各自独立做一次线性变换，且所有位置共享权重。
+        这正是 PointNet "逐点 MLP" 的含义，天然满足置换等变性。
+
+    数据流：
+        (B, N, 3)
+            → permute → (B, 3, N)          # Conv1d 要求 channel 在第二维
+            → Conv1d ×4 + ReLU             # 逐点升维
+            → (B, 512, N)
+            → MaxPool over N               # 置换不变聚合
+            → (B, 512)                     # 全局特征向量
+            → FC → mu      : (B, zdim)
+            → FC → log_var : (B, zdim)
+    """
+
+    def __init__(self, zdim: int):
+        """
+        Args:
+            zdim: shape latent z 的维度（与 PointwiseNet 的 zdim 保持一致）
+        """
+        super().__init__()
+
+        # --- 逐点特征提取：4 层 Conv1d，kernel_size=1 ---
+        # kernel_size=1：每个点只看自己，不看邻居（置换等变）
+        # 不需要 padding（padding 会改变序列长度 N，kernel=1 时无意义）
+        # 维度变化：3 → 128 → 128 → 256 → 512
+        self.conv1 = nn.Conv1d(3, 128, kernel_size=1)  # (B,   3, N) → (B, 128, N)
+        self.conv2 = nn.Conv1d(128, 128, kernel_size=1)  # (B, 128, N) → (B, 128, N)
+        self.conv3 = nn.Conv1d(128, 256, kernel_size=1)  # (B, 128, N) → (B, 256, N)
+        self.conv4 = nn.Conv1d(256, 512, kernel_size=1)  # (B, 256, N) → (B, 512, N)
+
+        # conv 层统一使用 ReLU（与 PointwiseNet 的 LeakyReLU 区分：
+        # Encoder 是分类/压缩任务，ReLU 足够；PointwiseNet 需要输出可负的坐标偏移）
+        self.act = nn.ReLU()
+
+        # 双头 FC：MaxPool 后全局特征 (B, 512) → 分别输出 mu 和 log_var
+        # 两个头权重独立，不能共享（各自学习不同的投影方向）
+        self.fc_mu = nn.Linear(512, zdim)  # (B, 512) → (B, zdim)
+        self.fc_log_var = nn.Linear(512, zdim)  # (B, 512) → (B, zdim)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Args:
+            x: (B, N, 3)  输入点云
+
+        Returns:
+            mu     : (B, zdim)  latent 均值
+            log_var: (B, zdim)  latent 对数方差（log σ²）
+        """
+        # --- Step 1: 调整维度顺序以适配 Conv1d ---
+        # Conv1d 期望 (B, C, L)，坐标维 3 需要换到第二位
+        # permute(0, 2, 1)：batch 维不动，N 和 3 互换
+        x = x.permute(0, 2, 1)  # (B, N, 3) → (B, 3, N)
+
+        # --- Step 2: 4 层逐点特征提取 ---
+        # 每层：Conv1d → ReLU，channel 逐步扩大以提取更抽象的特征
+        x = self.act(self.conv1(x))  # (B,   3, N) → (B, 128, N)
+        x = self.act(self.conv2(x))  # (B, 128, N) → (B, 128, N)
+        x = self.act(self.conv3(x))  # (B, 128, N) → (B, 256, N)
+        x = self.act(self.conv4(x))  # (B, 256, N) → (B, 512, N)
+
+        # --- Step 3: MaxPool over N，得到全局特征 ---
+        # torch.max(tensor, dim) 返回 namedtuple(values, indices)，取 .values
+        # 置换不变性保证：无论点的排列顺序，MaxPool 结果不变
+        feat = torch.max(x, dim=2).values  # (B, 512, N) → (B, 512)
+
+        # --- Step 4: 双头 FC，输出分布参数 ---
+        # log_var 不加激活：允许取任意实数，exp(log_var) 自然为正
+        mu = self.fc_mu(feat)  # (B, 512) → (B, zdim)
+        log_var = self.fc_log_var(feat)  # (B, 512) → (B, zdim)
+
+        return mu, log_var
