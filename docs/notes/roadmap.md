@@ -103,18 +103,18 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 ### Phase 5 — 生成模型（FlowVAE / GaussianVAE）
 
-| # | 组件 | 文件 | 状态 |
-|---|---|---|---|
-| 5-A | `GaussianVAE`（简单版，p(z)=N(0,I)） | `model.py` | 🔲 待实现 |
-| 5-B | Normalizing Flow（Affine Coupling Layers） | `model.py` | 🔲 待实现 |
-| 5-C | `FlowVAE`（完整生成模型） | `model.py` | 🔲 待实现 |
-| 5-D | 训练循环（扩散损失 + KL 损失） | `scripts/train_gen.py` | 🔲 待实现 |
+| # | 组件 | 文件 | 测试/训练 | 文档 | 状态 |
+|---|---|---|---|---|---|
+| 5-A | `GaussianVAE`（简单版，p(z)=N(0,I)） | `model.py` | `scripts/train_gen.py` | `docs/code_guide/07_gaussian_vae.md` | ✅ 完成 |
+| 5-B | Normalizing Flow（Affine Coupling Layers） | `model.py` | — | — | 🔲 待实现 |
+| 5-C | `FlowVAE`（完整生成模型） | `model.py` | — | — | 🔲 待实现 |
 
 **关键概念**：
-- KL 散度项的直觉：为什么需要它？
-- Normalizing Flow 的 change-of-variable 公式
-- `kl_weight=0.001` 的作用（损失权重平衡）
-- 超参: `T=100, β_T=0.02, lr=2e-3, kl_weight=0.001`
+- 重参数化技巧：为什么 `z = mu + std * eps` 而不是直接 `sample(mu, std)`？
+- KL 散度 closed-form 推导，以及为什么能写成 `-0.5 * (1 + log_var - mu² - exp(log_var))`
+- `kl_weight=0.001`：量纲差异——扩散损失是 per-point MSE，KL 是 per-latent-dim 求和，权重平衡两者
+- 超参: `T=100, β_T=0.02, lr=2e-3, kl_weight=0.001`（与 AutoEncoder 的对比）
+- `mu ^ 2` vs `mu ** 2`：Python 按位异或陷阱（已记录）
 
 ---
 
