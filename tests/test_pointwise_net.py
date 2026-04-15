@@ -53,9 +53,7 @@ def test_residual_vs_no_residual():
 
     print(f"形状相同: {shape_ok}      (期望 True)")
     print(f"值不同  : {values_diff}   (期望 True，残差会改变输出值)")
-    print(
-        f"差值范数: {(out_res - out_nores).norm().item():.4f}  (≈ x 的范数，即 x 被加进去的效果)"
-    )
+    print(f"差值范数: {(out_res - out_nores).norm().item():.4f}  (≈ x 的范数，即 x 被加进去的效果)")
 
     assert shape_ok, "形状应相同"
     assert values_diff, "残差开关应改变输出值"
