@@ -16,7 +16,7 @@ This is the user's **first paper reproduction project**. They are a **3D CV begi
 - **Never assume 3DCV prior knowledge**: terms like "point cloud normalization", "shape latent", "Chamfer distance", or domain-specific engineering choices (e.g. why Conv1d over Conv2d for point clouds) must be explained when they first appear.
 - **Step-by-step, one block at a time**: implement one self-contained component per session. Do NOT write the entire model at once. After each component, suggest a minimal test to verify it works before proceeding.
 - **Teach PyTorch engineering patterns as they arise**: e.g., why `log_var` instead of `sigma`, what `register_buffer` does, why gradients are detached in certain places, etc.
-- **"复现" not "跑通"**: the goal is independent reimplementation from the paper, using the reference repo only as a sanity check (never to copy code). Code should feel like annotated pseudocode that makes the paper tangible.
+- **Reimplementation, not just running code**: the goal is independent reimplementation from the paper, using the reference repo only as a sanity check (never to copy code). Code should feel like annotated pseudocode that makes the paper tangible.
 - **This is a long-term skill-building exercise**: correctness and understanding matter more than speed. It's fine to take 1-2 sessions just to understand and test a single module.
 
 ## Implementation Philosophy
@@ -64,15 +64,15 @@ This is the user's **first paper reproduction project**. They are a **3D CV begi
 
 ## Collaboration Mode: Scaffold → Fill-in → Review
 
-当前阶段的协作方式（可随学习进展调整）：
+Current collaboration workflow (adjustable as learning progresses):
 
-1. **概念讲解**：AI 先解释下一个组件的原理和设计动机
-2. **脚手架**：AI 在 `model.py` 中写好类/方法签名、注释、TODO 占位，不写实现
-   - 每个 TODO 粒度尽量小（单一职责），包含输入输出 shape 提示
-   - 从简单模式做起，再写复杂模式
-3. **用户填写**：用户根据注释提示尝试实现
-4. **诊断修改**：AI 审查用户代码，指出 bug 和非最佳实践，修改为正式版
-5. **文档收尾**：AI 撰写 `docs/code_guide/` 导读 + 更新 `roadmap.md`
+1. **Concept explanation**: AI explains the next component's purpose and design motivation
+2. **Scaffold**: AI writes class/method signatures, comments, and TODO placeholders in `model.py` — no implementation
+   - Each TODO should be fine-grained (single responsibility) with input/output shape hints
+   - Start with the simpler mode before the complex one
+3. **User fills in**: User attempts implementation guided by the comments
+4. **Diagnose & finalize**: AI reviews user code, flags bugs and non-ideal practices, finalizes the code
+5. **Documentation**: AI writes `docs/code_guide/` walkthrough + updates `roadmap.md`
 
 ## Conventions
 

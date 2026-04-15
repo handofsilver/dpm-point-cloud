@@ -4,24 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Purpose
 
-This is a personal **paper-reading companion repo**: simplified PyTorch implementations of classic model architectures, built for understanding data flow and architecture correspondence to the original papers — not for industrial-grade performance or production use.
+A **paper-reading companion repo**: a clean, heavily-annotated PyTorch reimplementation of one paper:
 
-Each subdirectory corresponds to one paper/topic (e.g., `VAE/`, `DDPM/`, `DPM_3D/`). Each directory contains:
-- The original paper PDF
-- The user's study notes (Chinese, Markdown)
-- Implementation code
+> Luo & Hu, "Diffusion Probabilistic Models for 3D Point Cloud Generation", CVPR 2021
+
+Built for understanding data flow and architecture correspondence to the paper — not for production use or benchmarking.
 
 ## Implementation Philosophy
 
-- **Readability over performance**: code should read like annotated pseudocode corresponding to the paper's method. Naming should be clear, readable, and follow standard programming conventions.
-- **Thorough comments**: every layer, forward pass step, and loss computation must document input/output tensor shapes and semantic meaning. This is the primary value of the repo — understanding data flow at a glance. Example:
+- **Readability over performance**: code should read like annotated pseudocode corresponding to the paper's method. Naming should be clear and follow standard conventions.
+- **Thorough comments**: every layer, forward pass step, and loss computation must document input/output tensor shapes and semantic meaning. This is the primary value of the repo. Example:
   ```python
   # Encode input to latent distribution parameters
-  # x: (batch_size, 784) -> mu: (batch_size, latent_dim), log_var: (batch_size, latent_dim)
+  # x: (B, N, 3) -> mu: (B, F), log_var: (B, F)
   ```
 - **Minimal and self-contained**: each implementation should be understandable on its own without jumping across many files. Avoid deep abstraction hierarchies.
-- **Reference the paper where helpful**: cite equation numbers or sections at key steps (e.g., `# Eq. (7): reparameterization trick`), but don't overdo it — shape and semantics comments take priority.
-- **Standard datasets**: use well-known datasets available via `torchvision.datasets` (e.g., MNIST) to keep setup trivial.
+- **Reference the paper**: cite equation numbers at key steps (e.g., `# Eq. (13): one-step forward sampling`), but shape/semantics comments take priority.
 
 ## Tech Stack
 
@@ -29,65 +27,48 @@ Each subdirectory corresponds to one paper/topic (e.g., `VAE/`, `DDPM/`, `DPM_3D
 - Minimal dependencies: numpy, matplotlib for visualization
 - No custom training frameworks — plain training loops with `torch.optim`
 
-## Paper-Specific Context
+## Paper Context — DPM-3D (Luo & Hu 2021)
 
-Each subdirectory contains the original paper PDF. Implementation should treat the PDF as the primary reference — do not rely on prior knowledge of the paper. If the current paper is not listed below, read its PDF directly.
+- Reference repo: `/home/eliosilver/Github_Projects/diffusion-point-cloud` (read-only reference; reimplementation must be independent)
+- Detailed study notes: `docs/notes/`
 
-### VAE (Kingma & Welling 2014/2022)
+### Core Concepts
+- Each point in a point cloud is independently sampled from $q(x_i^{(0)} | z)$, linked through a shared shape latent $z$
+- Forward diffusion: $q(x^{(t)}|x^{(0)}) = \mathcal{N}(\sqrt{\bar\alpha_t} x^{(0)}, (1-\bar\alpha_t)I)$ — one-step jump sampling
+- Reverse diffusion (generation): $z$-conditioned Markov chain, network predicts noise $\epsilon_\theta$
+- Loss: MSE($\epsilon_\theta$, $\epsilon$) — simplified from the KL term in the ELBO
 
-- Encoder outputs `mu` and `log_var`（不用 `sigma`），保证数值稳定性
-- Loss 中 KL 项使用两个高斯分布的闭式解，不要用采样近似
+### Architecture Summary
+- **PointNetEncoder**: Conv1d(3→128→128→256→512) + MaxPool + dual-head FC → (mu, log_var)
+- **ConcatSquashLinear**: `output = Linear(x) * sigmoid(Linear_gate(ctx)) + Linear_bias(ctx)`
+- **PointwiseNet**: 6-layer ConcatSquashLinear MLP (3→128→256→512→256→128→3), processes each point independently
+- **VarianceSchedule**: linear β schedule, precomputes α_bar etc.; flexibility parameter interpolates between two variance choices
+- **Normalizing Flow** (generation mode only): Affine Coupling Layers parameterize p(z)
 
-### DDPM (Ho et al. 2020)
+### Two Operating Modes
+- **AutoEncoder**: PointNet → z → Diffusion decode. No KL term. T=200, β_T=0.05, lr=1e-3
+- **FlowVAE/GaussianVAE**: PointNet → (μ,σ) → z → Diffusion decode + KL(q||p). T=100, β_T=0.02, lr=2e-3, kl_weight=0.001
 
-- 待补充（placeholder）
-
-### DPM-3D (Luo & Hu 2021)
-
-- 源仓库参考: `/home/eliosilver/Github_Projects/diffusion-point-cloud`（可读不可抄，复现要自己搭建思路）
-- 详细论文笔记见 `notes.md`
-
-#### 核心概念
-- 点云中每个点独立采样自点分布 $q(x_i^{(0)} | z)$，通过共享的 shape latent $z$ 关联
-- 前向扩散: $q(x^{(t)}|x^{(0)}) = \mathcal{N}(\sqrt{\bar\alpha_t} x^{(0)}, (1-\bar\alpha_t)I)$ — 可一步跳采
-- 逆扩散（生成）: 以 $z$ 为条件的 Markov chain，网络预测噪声 $\epsilon_\theta$
-- 损失: MSE($\epsilon_\theta$, $\epsilon$) — 等价于 ELBO 中 KL 项的简化
-
-#### 架构要点
-- **PointNetEncoder**: Conv1d(3→128→128→256→512) + MaxPool + 双头FC → (mu, log_var)
-  - AutoEncoder 模式只用 mu（确定性编码），Generation 模式用重参数化
-- **ConcatSquashLinear**: `output = Linear(x) * sigmoid(Linear_gate(ctx)) + Linear_bias(ctx)` — 条件注入的核心机制
-- **PointwiseNet**: 6层 ConcatSquashLinear MLP (3→128→256→512→256→128→3)，每个点独立处理
-  - 时间嵌入: [β, sin(β), cos(β)]（极简，仅3维）
-  - 上下文: cat(time_emb, z) → (B, 1, F+3)
-  - 带残差连接
-- **VarianceSchedule**: 线性 β schedule，预计算 α_bar 等；采样时有 flexibility 参数插值两种方差
-- **Normalizing Flow** (仅生成模式): Affine Coupling Layers 参数化 p(z)
-
-#### 两种模式
-- **AutoEncoder**: PointNet → z → Diffusion decode。无 KL 项。T=200, β_T=0.05, lr=1e-3
-- **FlowVAE/GaussianVAE**: PointNet → (μ,σ) → z → Diffusion decode + KL(q||p)。T=100, β_T=0.02, lr=2e-3, kl_weight=0.001
-
-#### 实现约束
-- 数据: ShapeNet 点云，2048 points/shape，归一化到零均值单位方差
-- Encoder 输出 mu 和 log_var（不是 sigma），与 VAE 目录一致
-- 优化器: Adam，梯度裁剪 max_norm=10，线性 LR 衰减
+### Implementation Constraints
+- Data: ShapeNet point clouds, 2048 points/shape, normalized to zero mean and unit variance
+- Encoder outputs mu and log_var (not sigma) for numerical stability
+- Optimizer: Adam, gradient clipping max_norm=10, linear LR decay
 
 ## Collaboration Mode: Scaffold → Fill-in → Review
 
-当前阶段的协作方式（可随学习进展调整）：
+Current collaboration workflow (adjustable as learning progresses):
 
-1. **概念讲解**：AI 先解释下一个组件的原理和设计动机
-2. **脚手架**：AI 在 `model.py` 中写好类/方法签名、注释、TODO 占位，不写实现
-   - 每个 TODO 粒度尽量小（单一职责），包含输入输出 shape 提示
-   - 从简单模式（如 `get_loss`）做起，再写复杂模式（如 `sample`）
-3. **用户填写**：用户根据注释提示尝试实现
-4. **诊断修改**：AI 审查用户代码，指出 bug 和非最佳实践，修改为正式版
-5. **文档收尾**：AI 撰写 `docs/code_guide/` 导读 + 更新 `roadmap.md`
+1. **Concept explanation**: AI explains the next component's purpose and design motivation
+2. **Scaffold**: AI writes class/method signatures, comments, and TODO placeholders in `model.py` — no implementation
+   - Each TODO should be fine-grained (single responsibility) with input/output shape hints
+   - Start with the simpler mode (e.g., `get_loss`) before the complex one (e.g., `sample`)
+3. **User fills in**: User attempts implementation guided by the comments
+4. **Diagnose & finalize**: AI reviews user code, flags bugs and non-ideal practices, finalizes the code
+5. **Documentation**: AI writes `docs/code_guide/` walkthrough + updates `roadmap.md`
 
 ## Conventions
 
-- Training scripts: `train.py` as entry point
-- Model definitions: `model.py` or similar, with each component (Encoder, Decoder, full VAE, etc.) as a separate `nn.Module`
-- Keep the Encoder output as `mu` and `log_var` (not `sigma`), matching the standard parameterization for numerical stability
+- Model definitions: `model.py`, each component as a separate `nn.Module`
+- Encoder output: `mu` and `log_var` (not `sigma`) for numerical stability
+- Training scripts: `scripts/train_ae.py`, `scripts/train_gen.py`
 - Visualization / sampling scripts separate from training
