@@ -124,8 +124,7 @@ class VarianceSchedule(nn.Module):
         idx = t - 1  # (B,)
 
         sigma = (
-            flexibility * self.sigmas_flex[idx]
-            + (1 - flexibility) * self.sigmas_inflex[idx]
+            flexibility * self.sigmas_flex[idx] + (1 - flexibility) * self.sigmas_inflex[idx]
         )  # (B,)
         return sigma
 
@@ -356,8 +355,7 @@ class DiffusionPoint(nn.Module):
         # x^(t) = sqrt(α_bar_t) · x^(0) + sqrt(1 - α_bar_t) · ε
         # alpha_bar: (B,) → view(B,1,1) 与 x0: (B,N,3) 广播
         x_noisy = (
-            torch.sqrt(alpha_bar).view(B, 1, 1) * x0
-            + torch.sqrt(1 - alpha_bar).view(B, 1, 1) * eps
+            torch.sqrt(alpha_bar).view(B, 1, 1) * x0 + torch.sqrt(1 - alpha_bar).view(B, 1, 1) * eps
         )  # (B, N, 3)
 
         # --- Step 5: 预测噪声 ---
@@ -409,9 +407,7 @@ class DiffusionPoint(nn.Module):
 
             # 逆向均值（去噪一步）
             # x_{t-1} = (1/√α_t) · (x_t − (1−α_t)/√(1−ᾱ_t) · ε_θ)
-            x = (1 / alpha.sqrt()) * (
-                x - (1 - alpha) / (1 - alpha_bar).sqrt() * eps_pred
-            )
+            x = (1 / alpha.sqrt()) * (x - (1 - alpha) / (1 - alpha_bar).sqrt() * eps_pred)
 
             # 加回随机性（t=1 时不加，此时已经是最终输出）
             # sigma: (B,) → view(B,1,1) 与 z_noise: (B,N,3) 广播
@@ -582,3 +578,111 @@ class AutoEncoder(nn.Module):
             x: (B, N, 3) 生成的点云
         """
         return self.diffusion.sample(z, num_points, flexibility)
+
+
+# =============================================================================
+# Phase 5-A: GaussianVAE
+# 作用: 在 AutoEncoder 基础上引入 KL 正则，使 z 的先验逼近 N(0, I)
+# 对应论文: Section 4.3（GaussianVAE 模式）
+# =============================================================================
+
+
+class GaussianVAE(nn.Module):
+    """
+    点云生成 VAE，先验 p(z) = N(0, I)。
+
+    与 AutoEncoder 的两处关键区别：
+
+    1. **重参数化采样**（训练时）
+       AutoEncoder:   z = mu                           # 确定性，无法生成新形状
+       GaussianVAE:   z = mu + std * eps, eps~N(0,I)   # 随机性，梯度仍可流过
+
+    2. **KL 散度正则项**
+       KL(q(z|x) || p(z)) 把 encoder 的输出分布拉向标准正态，
+       使得推理时可以直接从 N(0, I) 采 z 来生成新形状（无需输入点云）。
+
+    总损失 = L_diffusion + kl_weight * L_KL
+    超参: T=100, beta_T=0.02, lr=2e-3, kl_weight=0.001
+    """
+
+    def __init__(
+        self,
+        encoder: PointNetEncoder,
+        diffusion: DiffusionPoint,
+    ):
+        """
+        Args:
+            encoder  : 已构建好的 PointNetEncoder 实例
+            diffusion: 已构建好的 DiffusionPoint 实例
+        """
+        super().__init__()
+        self.encoder = encoder
+        self.diffusion = diffusion
+
+    def get_loss(self, x0: torch.Tensor, kl_weight: float) -> torch.Tensor:
+        """
+        编码点云 → 重参数化采 z → 扩散损失 + KL 损失。
+
+        Args:
+            x0        : (B, N, 3)  输入点云（干净，未加噪）
+            kl_weight : float      KL 项的权重，典型值 0.001
+
+        Returns:
+            loss: 标量 Tensor，L_diffusion + kl_weight * L_KL
+        """
+        # --- Step 1: 编码点云，得到后验分布参数 ---
+        # q(z|x) = N(mu, diag(exp(log_var)))
+        # mu: (B, zdim), log_var: (B, zdim)
+        mu, log_var = self.encoder(x0)
+
+        # --- Step 2: 重参数化技巧，采样 z ~ q(z|x) ---
+        # 直接采样不可微（梯度无法流过随机节点），重参数化将随机性移到 eps：
+        #   std = exp(0.5 * log_var)    [用 log_var 而非 sigma，避免对负数开根号]
+        #   eps ~ N(0, I)               [与参数无关，梯度不流过这里]
+        #   z   = mu + std * eps        [梯度对 mu 和 std（即 log_var）均可流]
+        # std: (B, zdim), eps: (B, zdim), z: (B, zdim)
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        z = mu + std * eps
+
+        # --- Step 3: 扩散损失 L_diffusion ---
+        # 与 AutoEncoder.get_loss 完全一致，z 已采好，直接传入
+        # 内部随机采 t、加噪、预测噪声、返回 MSE — 见 DiffusionPoint.get_loss
+        # loss_diffusion: 标量
+        loss_diffusion = self.diffusion.get_loss(x0, z)
+
+        # --- Step 4: KL 散度 L_KL（closed-form，对角高斯 vs 标准正态）---
+        # KL(N(mu, sigma^2) || N(0, I)) = -1/2 * sum_d(1 + log_var_d - mu_d^2 - exp(log_var_d))
+        # 对 zdim 维先 sum，再对 batch 取 mean，得到标量
+        # 注意：Python 中 ** 是幂运算，^ 是按位异或——对 float Tensor 用 ^ 会报错！
+        loss_kl = -0.5 * (1 + log_var - mu**2 - torch.exp(log_var)).sum(dim=1).mean()
+
+        # --- Step 5: 合并损失 ---
+        # kl_weight 极小（0.001），防止 KL 项过强压制扩散重建能力
+        loss = loss_diffusion + kl_weight * loss_kl
+        return loss
+
+    def sample(
+        self,
+        batch_size: int,  # 生成几个形状
+        num_points: int,  # 每个形状多少点（通常 2048）
+        flexibility: float,  # 方差插值系数，0=窄，1=宽
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        从先验 p(z) = N(0, I) 采样 z，再逆向扩散生成点云。
+
+        这里不调用 Encoder——z 直接从标准正态采样。
+        KL 正则保证了 encoder 输出的分布接近 N(0, I)，
+        从而使先验采样的 z 落在 decoder 见过的分布里。
+
+        Returns:
+            x: (B, N, 3) 生成的点云
+        """
+        # 从先验采样 z ~ N(0, I)
+        # zdim 从 encoder 的输出头读取，无需手动传入
+        zdim = self.encoder.fc_mu.out_features
+        z = torch.randn(batch_size, zdim, device=device)  # (B, zdim)
+
+        # 逆向扩散生成点云: z → x^(T) → x^(T-1) → ... → x^(0)
+        return self.diffusion.sample(z, num_points, flexibility)  # (B, N, 3)
