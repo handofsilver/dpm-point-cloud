@@ -39,7 +39,7 @@ z ~ prior  ──►  x^(T) ~ N(0,I)
                 return x^(0)
 ```
 
-**Core modules** (implemented in order):
+**Core modules** (all implemented in `model.py`):
 
 | Module | Role | Docs |
 |--------|------|------|
@@ -47,11 +47,12 @@ z ~ prior  ──►  x^(T) ~ N(0,I)
 | `ConcatSquashLinear` | Conditional gated linear layer — injects time + shape latent | [02](docs/code_guide/02_concat_squash_linear.md) |
 | `PointwiseNet` | 6-layer MLP noise predictor, processes each point independently | [03](docs/code_guide/03_pointwise_net.md) |
 | `DiffusionPoint` | Orchestrates training (forward + loss) and sampling (reverse loop) | [04](docs/code_guide/04_diffusion_point.md) |
-| `PointNetEncoder` | Point cloud → shape latent z via Conv1d + MaxPool | *(in progress)* |
-| `AutoEncoder` | End-to-end: encode → diffusion decode, no KL | *(planned)* |
-| `FlowVAE` | Full generative model with Normalizing Flow prior on z | *(planned)* |
-
-See [`docs/architecture.md`](docs/architecture.md) for the full data flow with Mermaid diagrams.
+| `PointNetEncoder` | Point cloud → shape latent z via Conv1d + MaxPool | [05](docs/code_guide/05_pointnet_encoder.md) |
+| `AutoEncoder` | End-to-end: encode → diffusion decode, no KL | [06](docs/code_guide/06_autoencoder.md) |
+| `GaussianVAE` | VAE with fixed N(0,I) prior on z | [07](docs/code_guide/07_gaussian_vae.md) |
+| `AffineCouplingLayer` | Single invertible affine coupling step | [08](docs/code_guide/08_affine_coupling_layer.md) |
+| `NormalizingFlow` | K stacked coupling layers — parameterizes p(z) | [09](docs/code_guide/09_normalizing_flow.md) |
+| `FlowVAE` | Full generative model with Normalizing Flow prior | [10](docs/code_guide/10_flow_vae.md) |
 
 ---
 
@@ -66,18 +67,66 @@ See [`docs/architecture.md`](docs/architecture.md) for the full data flow with M
 
 ---
 
-## Documentation
+## Data Preparation
 
-Each module has a companion guide under `docs/code_guide/`:
+This repo does **not** auto-download data. The dataset is ShapeNet point clouds pre-packaged as `.h5` files by the original authors.
 
-- Mathematical derivation with paper equation references (LaTeX)
-- Annotated data flow
-- PyTorch engineering notes (e.g., why `register_buffer`, why `log_var` not `sigma`)
+1. Download the `.h5` files from the link provided in the [original repo](https://github.com/luost26/diffusion-point-cloud)
+2. Place them under `data/shapenet/`, keeping the original filenames (e.g. `train_0.h5`, `test_0.h5`)
 
-Additional notes:
-- [`docs/notes/paper_deep_dive.md`](docs/notes/paper_deep_dive.md) — design rationale: two sigma variants, time embedding choice, why random-sample t, etc.
-- [`docs/notes/pytorch_notes.md`](docs/notes/pytorch_notes.md) — PyTorch patterns encountered during implementation
-- [`docs/notes/roadmap.md`](docs/notes/roadmap.md) — implementation progress tracker
+`ShapeNetDataset` scans for all `*train*.h5` / `*test*.h5` files in that directory automatically.
+
+---
+
+## Usage
+
+**Run component tests** (no data required):
+
+```bash
+conda run -n dpm3d python tests/test_variance_schedule.py
+conda run -n dpm3d python tests/test_concat_squash_linear.py
+conda run -n dpm3d python tests/test_pointwise_net.py
+conda run -n dpm3d python tests/test_encoder.py
+conda run -n dpm3d python tests/test_diffusion_point.py
+```
+
+**Train AutoEncoder**:
+
+```bash
+conda run -n dpm3d python scripts/train_ae.py \
+    --data_root data/shapenet \
+    --save_dir checkpoints/ae
+```
+
+**Evaluate reconstruction** (input vs. reconstructed, with Chamfer Distance):
+
+```bash
+conda run -n dpm3d python scripts/reconstruct.py \
+    --data_root data/shapenet \
+    --ckpt checkpoints/ae/epoch_2000.pt \
+    --out_dir results/reconstruct
+```
+
+**Train generative model**:
+
+```bash
+# GaussianVAE (simpler prior)
+conda run -n dpm3d python scripts/train_gen.py \
+    --data_root data/shapenet --model gaussian
+
+# FlowVAE (learned prior)
+conda run -n dpm3d python scripts/train_gen.py \
+    --data_root data/shapenet --model flow
+```
+
+**Generate new shapes**:
+
+```bash
+conda run -n dpm3d python scripts/generate.py \
+    --ckpt checkpoints/gen/flow_epoch_2000.pt \
+    --model flow \
+    --out_dir results/generate
+```
 
 ---
 
@@ -86,18 +135,44 @@ Additional notes:
 ```
 DPM_3D/
 ├── model.py              All nn.Module definitions
+├── dataset.py            ShapeNet data loading
+├── metrics.py            Chamfer Distance
+├── visualize.py          3D point cloud visualization
 ├── tests/                Per-module verification scripts
-├── docs/
-│   ├── architecture.md   Global data flow + module I/O reference
-│   ├── code_guide/       Per-module walkthroughs (math + code)
-│   ├── notes/            Study notes: paper deep-dives, PyTorch patterns, roadmap
-│   └── paper/            Original paper PDF + AI-summarized notes
-└── scripts/              (planned) train_ae.py, train_gen.py
+├── scripts/
+│   ├── train_ae.py       AutoEncoder training
+│   ├── train_gen.py      GaussianVAE / FlowVAE training
+│   ├── reconstruct.py    Reconstruction evaluation
+│   └── generate.py       Generation diversity showcase
+└── docs/
+    ├── code_guide/       Per-module walkthroughs (math + code)
+    └── notes/            Study notes: paper deep-dives, PyTorch patterns, roadmap
 ```
 
 ---
 
-## Acknowledgements
+## Documentation
 
-- Paper: [Luo & Hu, CVPR 2021](https://arxiv.org/abs/2103.01458)
-- Original implementation: [luost26/diffusion-point-cloud](https://github.com/luost26/diffusion-point-cloud)
+Each module has a companion guide under `docs/code_guide/` combining:
+- Mathematical derivation with paper equation references (LaTeX)
+- Annotated tensor data flow
+- PyTorch engineering notes
+
+Additional notes:
+- [`docs/notes/paper_deep_dive.md`](docs/notes/paper_deep_dive.md) — design rationale behind key choices
+- [`docs/notes/pytorch_notes.md`](docs/notes/pytorch_notes.md) — PyTorch patterns encountered during implementation
+- [`docs/notes/roadmap.md`](docs/notes/roadmap.md) — implementation progress tracker
+
+---
+
+## Citation
+
+```bibtex
+@inproceedings{luo2021diffusion,
+  author = {Luo, Shitong and Hu, Wei},
+  title = {Diffusion Probabilistic Models for 3D Point Cloud Generation},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  month = {June},
+  year = {2021}
+}
+```
