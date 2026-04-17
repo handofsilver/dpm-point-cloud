@@ -783,3 +783,75 @@ class AffineCouplingLayer(nn.Module):
         log_det = sign * s.sum(dim=-1)  # (B,)
 
         return y, log_det
+
+
+# =============================================================================
+# Phase 5-B-ii: NormalizingFlow
+# 作用: 堆叠 K 个 AffineCouplingLayer，参数化可学习先验 p_θ(z)
+# 对应论文: Section 4.4
+# =============================================================================
+
+
+class NormalizingFlow(nn.Module):
+    """
+    K 层仿射耦合 Flow，参数化先验分布 p_θ(z)。
+
+    暴露两个方向：
+      - inverse(z) → (u, log_det) : 训练路径，z→u，逆序遍历各层
+      - forward(u) → z            : 生成路径，u→z，正序遍历各层
+
+    训练时 FlowVAE 调用 inverse 算 log p_θ(z)：
+        log p_θ(z) = log p_u(u) - log_det
+    生成时 FlowVAE 调用 forward 把采样的 u 映射为 z。
+    """
+
+    def __init__(self, zdim: int, num_layers: int = 4, hidden_dim: int = 128):
+        """
+        Args:
+            zdim      : latent 维度
+            num_layers: 堆叠层数（论文用 4）
+            hidden_dim: 每层 s/t 网络的隐层宽度
+        """
+        super().__init__()
+
+        # 相邻层 flip 交替：偶数层前半不动，奇数层后半不动
+        # 确保每个维度都能被变换，也都充当过"条件"
+        self.layers = nn.ModuleList(
+            [AffineCouplingLayer(zdim, hidden_dim, flip=(i % 2 == 1)) for i in range(num_layers)]
+        )
+
+    def inverse(self, z: torch.Tensor):
+        """
+        训练路径：z → u，逆序遍历各层，每层传 reverse=True。
+
+        f_total = f_K ∘ ... ∘ f_1，所以 f_total^{-1} = f_1^{-1} ∘ ... ∘ f_K^{-1}，
+        必须从第 K 层向第 1 层倒着拆。
+
+        Args:
+            z: (B, zdim)  来自 encoder 重参数化的 latent
+
+        Returns:
+            u      : (B, zdim)  映射回简单分布的向量
+            log_det: (B,)       所有层 log|det J| 的累加
+        """
+        u = z
+        log_det = torch.zeros(z.shape[0], device=z.device)  # 与输入同设备
+        for layer in reversed(self.layers):  # 逆序：f_K^{-1} → f_1^{-1}
+            u, ld = layer(u, reverse=True)
+            log_det = log_det + ld
+        return u, log_det
+
+    def forward(self, u: torch.Tensor) -> torch.Tensor:
+        """
+        生成路径：u → z，正序遍历各层，每层传 reverse=False。
+
+        Args:
+            u: (B, zdim)  从先验 N(0,I) 采样的向量
+
+        Returns:
+            z: (B, zdim)  映射到复杂分布的 latent
+        """
+        z = u
+        for layer in self.layers:  # 正序：f_1 → f_K
+            z, _ = layer(z, reverse=False)
+        return z
