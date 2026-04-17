@@ -108,7 +108,7 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 | 5-A | `GaussianVAE`（简单版，p(z)=N(0,I)） | `model.py` | `scripts/train_gen.py` | `docs/code_guide/07_gaussian_vae.md` | ✅ 完成 |
 | 5-B-i | `AffineCouplingLayer` | `model.py` | — | `docs/code_guide/08_affine_coupling_layer.md` | ✅ 完成 |
 | 5-B-ii | `NormalizingFlow`（K 层堆叠） | `model.py` | — | `docs/code_guide/09_normalizing_flow.md` | ✅ 完成 |
-| 5-C | `FlowVAE`（完整生成模型） | `model.py` | — | — | 🔲 待实现 |
+| 5-C | `FlowVAE`（完整生成模型） | `model.py` | `scripts/train_gen.py` | `docs/code_guide/10_flow_vae.md` | ✅ 完成 |
 
 **关键概念**：
 - 重参数化技巧：为什么 `z = mu + std * eps` 而不是直接 `sample(mu, std)`？
