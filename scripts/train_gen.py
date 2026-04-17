@@ -5,8 +5,8 @@ Paper: Luo & Hu, "Diffusion Probabilistic Models for 3D Point Cloud Generation",
 超参（GaussianVAE / FlowVAE 共用）：
     T=100, beta_T=0.02, zdim=256, lr=2e-3, kl_weight=0.001, grad_clip=10, epochs=2000
 运行方式：
-    conda run -n dpm3d python scripts/train_gen.py --data_root data/shapenet --model gaussian
-    conda run -n dpm3d python scripts/train_gen.py --data_root data/shapenet --model flow
+    conda run -n dpm3d python scripts/train_gen.py --data_path data/shapenet/shapenet.hdf5 --model gaussian
+    conda run -n dpm3d python scripts/train_gen.py --data_path data/shapenet/shapenet.hdf5 --model flow
 """
 
 import argparse
@@ -37,7 +37,7 @@ from model import (
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str, required=True, help="ShapeNet .h5 文件目录")
+    parser.add_argument("--data_path", type=str, required=True, help="shapenet.hdf5 文件路径")
     parser.add_argument(
         "--save_dir", type=str, default="checkpoints/gen", help="checkpoint 保存目录"
     )
@@ -107,7 +107,7 @@ def train(args):
     print(f"使用设备: {device} | 模型: {args.model}")
 
     # --- 数据 ---
-    dataset = ShapeNetDataset(root=args.data_root, split="train")
+    dataset = ShapeNetDataset(path=args.data_path, split="train")
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
 
     # --- 模型 ---
@@ -130,8 +130,8 @@ def train(args):
     for epoch in range(1, args.epochs + 1):
         model.train()
 
-        for x0 in loader:
-            x0 = x0.to(device)  # (B, N, 3)
+        for batch in loader:
+            x0 = batch["pointcloud"].to(device)  # (B, N, 3)
 
             optimizer.zero_grad()
 
