@@ -5,7 +5,7 @@ AutoEncoder 重建效果评估脚本
 
 运行方式：
     conda run -n dpm3d python scripts/reconstruct.py \
-        --data_root data/shapenet \
+        --data_path data/shapenet/shapenet.hdf5 \
         --ckpt checkpoints/ae/epoch_0100.pt \
         --num_samples 4 \
         --out_dir results/reconstruct
@@ -28,7 +28,7 @@ from visualize import plot_reconstruction
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=str, required=True)
+    parser.add_argument("--data_path", type=str, required=True, help="shapenet.hdf5 文件路径")
     parser.add_argument("--ckpt", type=str, required=True, help="AutoEncoder checkpoint 路径")
     parser.add_argument("--num_samples", type=int, default=4, help="评估样本数")
     parser.add_argument("--zdim", type=int, default=256)
@@ -61,9 +61,9 @@ def main():
     model.eval()
 
     # --- 数据：取前 num_samples 个测试样本 ---
-    dataset = ShapeNetDataset(root=args.data_root, split="test")
+    dataset = ShapeNetDataset(path=args.data_path, split="test")
     loader = DataLoader(dataset, batch_size=args.num_samples, shuffle=False)
-    x0 = next(iter(loader)).to(device)  # (B, N, 3)
+    x0 = next(iter(loader))["pointcloud"].to(device)  # (B, N, 3)
 
     os.makedirs(args.out_dir, exist_ok=True)
 
