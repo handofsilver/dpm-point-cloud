@@ -168,12 +168,28 @@ alpha_bar.view(B, 1, 1) * x0   # (B, 1, 1) * (B, N, 3) → (B, N, 3) ✓
 
 ---
 
-## 7. （占位）更多话题待补充
+## 7. `min/max/sort` 沿维度操作返回 namedtuple
 
-- `torch.cumprod` 的用法
-- 为什么用 `log_var` 而不是 `sigma`
-- `detach()` 在什么情况下必须用
-- `Conv1d` 为什么比 `Conv2d` 更适合点云
+```python
+dist = ...  # (B, N, M)
+
+# 错误：返回的不是 Tensor，不能直接 .mean()
+dist.min(dim=2)              # torch.return_types.min，包含 values 和 indices
+
+# 正确：取 .values 得到 Tensor
+dist.min(dim=2).values       # (B, N)，每行的最小值
+dist.min(dim=2).indices      # (B, N)，每行最小值所在的列索引
+```
+
+带 `dim` 参数的 `torch.min`、`torch.max`、`torch.sort` 均返回 namedtuple 而非普通 Tensor。只需要值时加 `.values`，需要位置时加 `.indices`。
+
+**实际场景**（Chamfer Distance 里的距离矩阵）：
+
+```python
+dist = ((p.unsqueeze(2) - q.unsqueeze(1)) ** 2).sum(dim=-1)  # (B, N, M)
+d_pq = dist.min(dim=2).values.mean(dim=1)  # (B,)：p 里每点到 q 的最近距离均值
+d_qp = dist.min(dim=1).values.mean(dim=1)  # (B,)：q 里每点到 p 的最近距离均值
+```
 
 ---
 
