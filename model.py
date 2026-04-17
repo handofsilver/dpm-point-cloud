@@ -3,6 +3,7 @@ DPM-3D 复现
 Paper: Luo & Hu, "Diffusion Probabilistic Models for 3D Point Cloud Generation", CVPR 2021
 """
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -855,3 +856,100 @@ class NormalizingFlow(nn.Module):
         for layer in self.layers:  # 正序：f_1 → f_K
             z, _ = layer(z, reverse=False)
         return z
+
+
+# =============================================================================
+# Phase 5-C: FlowVAE
+# 作用: 用 NormalizingFlow 参数化先验，替代 GaussianVAE 的固定 N(0,I)
+# 对应论文: Section 4.4
+# =============================================================================
+
+
+class FlowVAE(nn.Module):
+    """
+    点云生成 VAE，先验 p_θ(z) 由 NormalizingFlow 参数化。
+
+    与 GaussianVAE 的两处区别：
+
+    1. KL 无 closed-form，改为 Monte Carlo 单样本估计：
+          L_KL = log q(z|x) - log p_θ(z)
+       其中 log p_θ(z) 通过 flow.inverse(z) 的换元公式计算。
+
+    2. sample 时先采 u ~ N(0,I)，再过 flow.forward(u) 得 z，
+       而非直接用 torch.randn 采 z。
+    """
+
+    def __init__(
+        self,
+        encoder: PointNetEncoder,
+        diffusion: DiffusionPoint,
+        flow: NormalizingFlow,
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.diffusion = diffusion
+        self.flow = flow
+
+    def get_loss(self, x0: torch.Tensor, kl_weight: float) -> torch.Tensor:
+        """
+        编码 → 重参数化 → 扩散损失 + MC KL 损失。
+
+        Args:
+            x0       : (B, N, 3)  输入点云
+            kl_weight: float      KL 权重（典型值 0.001）
+
+        Returns:
+            loss: 标量 Tensor
+        """
+        # Step 1: 编码，重参数化采 z（与 GaussianVAE 完全相同）
+        # eps 保留，供 Step 3 复用，避免重复计算 (z-mu)²/sigma²
+        mu, log_var = self.encoder(x0)  # 各 (B, zdim)
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        z = mu + std * eps  # (B, zdim)
+
+        # Step 2: 扩散损失（与 GaussianVAE 完全相同）
+        loss_diffusion = self.diffusion.get_loss(x0, z)  # 标量
+
+        # Step 3: log q(z|x)——后验对角高斯的 log 密度，(B,)
+        # eps = (z-mu)/std，所以 (z-mu)²/sigma² = eps²，直接复用
+        log_q = -0.5 * (math.log(2 * math.pi) + log_var + eps**2).sum(dim=-1)
+
+        # Step 4: log p_θ(z)——Flow 参数化先验的 log 密度
+        # flow.inverse 返回 log_det = Σ_k (-s_k.sum) = log|det J^{-1}|
+        # 换元公式：log p_θ(z) = log p_u(u) - log|det J_forward|
+        #                      = log p_u(u) + log|det J^{-1}|
+        #                      = log_p_u + log_det        ← 注意是加号
+        u, log_det = self.flow.inverse(z)  # u: (B, zdim), log_det: (B,)
+        log_p_u = -0.5 * (math.log(2 * math.pi) + u**2).sum(dim=-1)  # (B,)
+        log_p_z = log_p_u + log_det  # (B,)
+
+        # Step 5: Monte Carlo KL 估计，单样本近似期望，对 batch 取均值得标量
+        loss_kl = (log_q - log_p_z).mean()  # 标量
+
+        # Step 6: 合并损失
+        loss = loss_diffusion + kl_weight * loss_kl
+        return loss
+
+    def sample(
+        self,
+        batch_size: int,
+        num_points: int,
+        flexibility: float,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        先验采样 → Flow 正向 → 扩散生成点云。
+
+        Returns:
+            x: (B, N, 3)
+        """
+        zdim = self.encoder.fc_mu.out_features
+
+        # 从标准正态采 u，携带 device，避免 GPU 上 device mismatch
+        u = torch.randn(batch_size, zdim, device=device)  # (B, zdim)
+
+        # Flow 正向：u → z
+        z = self.flow(u)  # (B, zdim)
+
+        return self.diffusion.sample(z, num_points, flexibility)  # (B, N, 3)
