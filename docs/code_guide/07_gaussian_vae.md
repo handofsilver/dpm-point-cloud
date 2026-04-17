@@ -27,17 +27,23 @@ GaussianVAE 通过两处修改解决这个问题：
 
 把随机性分离到一个**与参数无关的噪声变量** $\varepsilon$ 上：
 
-$$z = \mu + \sigma \odot \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, I)$$
+$$
+z = \mu + \sigma \odot \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, I)
+$$
 
 现在 $z$ 对 $\mu$ 和 $\sigma$ 是确定性的可微函数，梯度可以正常流过：
 
-$$\frac{\partial z}{\partial \mu} = 1, \quad \frac{\partial z}{\partial \sigma} = \varepsilon$$
+$$
+\frac{\partial z}{\partial \mu} = 1, \quad \frac{\partial z}{\partial \sigma} = \varepsilon
+$$
 
 ### 为什么用 `log_var` 而不是 `sigma`？
 
 编码器直接输出 $\log \sigma^2$（`log_var`），而不是 $\sigma$：
 
-$$\sigma = \exp\!\left(\tfrac{1}{2} \log \sigma^2\right)$$
+$$
+\sigma = \exp\!\left(\tfrac{1}{2} \log \sigma^2\right)
+$$
 
 因为 $\sigma > 0$ 是约束，而 $\log \sigma^2 \in \mathbb{R}$ 没有约束——网络可以输出任意实数，训练更稳定，不用担心输出负数再开根号。
 
@@ -55,7 +61,9 @@ z   = mu + std * eps              # (B, zdim)，可微
 
 KL 散度衡量两个分布的"距离"。我们要最小化：
 
-$$\mathcal{L}_\text{KL} = \mathrm{KL}\!\left(q(z \mid x) \;\|\; p(z)\right)$$
+$$
+\mathcal{L}_\text{KL} = \mathrm{KL}\!\left(q(z \mid x) \;\|\; p(z)\right)
+$$
 
 其中 $q(z \mid x) = \mathcal{N}(\mu, \mathrm{diag}(\sigma^2))$，$p(z) = \mathcal{N}(0, I)$。
 
@@ -65,11 +73,15 @@ $$\mathcal{L}_\text{KL} = \mathrm{KL}\!\left(q(z \mid x) \;\|\; p(z)\right)$$
 
 对角高斯与标准正态的 KL 有解析解（Eq. 4 in VAE 原论文）：
 
-$$\mathrm{KL}\!\left(\mathcal{N}(\mu, \sigma^2) \;\|\; \mathcal{N}(0,1)\right) = -\frac{1}{2}\left(1 + \log \sigma^2 - \mu^2 - \sigma^2\right)$$
+$$
+\mathrm{KL}\!\left(\mathcal{N}(\mu, \sigma^2) \;\|\; \mathcal{N}(0,1)\right) = -\frac{1}{2}\left(1 + \log \sigma^2 - \mu^2 - \sigma^2\right)
+$$
 
 对所有 $d$ 个 latent 维度求和：
 
-$$\mathcal{L}_\text{KL} = -\frac{1}{2} \sum_{d=1}^{D}\!\left(1 + \log \sigma^2_d - \mu_d^2 - \sigma^2_d\right)$$
+$$
+\mathcal{L}_\text{KL} = -\frac{1}{2} \sum_{d=1}^{D}\!\left(1 + \log \sigma^2_d - \mu_d^2 - \sigma^2_d\right)
+$$
 
 在代码中，先对 `zdim` 维 `.sum(dim=1)`，再对 batch `.mean()`：
 
@@ -83,7 +95,9 @@ loss_kl = -0.5 * (1 + log_var - mu**2 - torch.exp(log_var)).sum(dim=1).mean()
 
 ## 4. 总损失
 
-$$\mathcal{L} = \mathcal{L}_\text{diffusion} + \lambda_\text{KL} \cdot \mathcal{L}_\text{KL}$$
+$$
+\mathcal{L} = \mathcal{L}_\text{diffusion} + \lambda_\text{KL} \cdot \mathcal{L}_\text{KL}
+$$
 
 `kl_weight`（即 $\lambda_\text{KL}$）设为 `0.001` 的原因：
 

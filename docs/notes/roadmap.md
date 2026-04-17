@@ -106,7 +106,8 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 | # | 组件 | 文件 | 测试/训练 | 文档 | 状态 |
 |---|---|---|---|---|---|
 | 5-A | `GaussianVAE`（简单版，p(z)=N(0,I)） | `model.py` | `scripts/train_gen.py` | `docs/code_guide/07_gaussian_vae.md` | ✅ 完成 |
-| 5-B | Normalizing Flow（Affine Coupling Layers） | `model.py` | — | — | 🔲 待实现 |
+| 5-B-i | `AffineCouplingLayer` | `model.py` | — | `docs/code_guide/08_affine_coupling_layer.md` | ✅ 完成 |
+| 5-B-ii | `NormalizingFlow`（K 层堆叠） | `model.py` | — | — | 🔲 待实现 |
 | 5-C | `FlowVAE`（完整生成模型） | `model.py` | — | — | 🔲 待实现 |
 
 **关键概念**：
@@ -115,6 +116,7 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 - `kl_weight=0.001`：量纲差异——扩散损失是 per-point MSE，KL 是 per-latent-dim 求和，权重平衡两者
 - 超参: `T=100, β_T=0.02, lr=2e-3, kl_weight=0.001`（与 AutoEncoder 的对比）
 - `mu ^ 2` vs `mu ** 2`：Python 按位异或陷阱（已记录）
+- `flip` vs `reverse`：两个独立维度，混淆会导致 log_det 符号错误（已记录）
 
 ---
 
