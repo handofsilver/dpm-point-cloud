@@ -67,14 +67,30 @@ z ~ prior  ──►  x^(T) ~ N(0,I)
 
 ---
 
+## Environment Setup
+
+```bash
+# Create the environment
+conda env create -f environment.yml
+# Activate the environment
+conda activate dpm3d
+```
+
+---
+
 ## Data Preparation
 
-This repo does **not** auto-download data. The dataset is ShapeNet point clouds pre-packaged as `.h5` files by the original authors.
+Download `shapenet.hdf5` from the original authors' Google Drive:
 
-1. Download the `.h5` files from the link provided in the [original repo](https://github.com/luost26/diffusion-point-cloud)
-2. Place them under `data/shapenet/`, keeping the original filenames (e.g. `train_0.h5`, `test_0.h5`)
+**[https://drive.google.com/drive/folders/1Su0hCuGFo1AGrNb_VMNnlF7qeQwKjfhZ](https://drive.google.com/drive/folders/1Su0hCuGFo1AGrNb_VMNnlF7qeQwKjfhZ)**
 
-`ShapeNetDataset` scans for all `*train*.h5` / `*test*.h5` files in that directory automatically.
+Place the file at:
+
+```
+data/shapenet/shapenet.hdf5
+```
+
+The HDF5 file has the structure `{synsetid}/{split} → (N, 2048, 3)`, covering all ShapeNet categories across `train` / `val` / `test` splits.
 
 ---
 
@@ -83,50 +99,77 @@ This repo does **not** auto-download data. The dataset is ShapeNet point clouds 
 **Run component tests** (no data required):
 
 ```bash
-conda run -n dpm3d python tests/test_variance_schedule.py
-conda run -n dpm3d python tests/test_concat_squash_linear.py
-conda run -n dpm3d python tests/test_pointwise_net.py
-conda run -n dpm3d python tests/test_encoder.py
-conda run -n dpm3d python tests/test_diffusion_point.py
+python tests/test_variance_schedule.py
+python tests/test_concat_squash_linear.py
+python tests/test_pointwise_net.py
+python tests/test_encoder.py
+python tests/test_diffusion_point.py
 ```
 
-**Train AutoEncoder**:
+**Train AutoEncoder** (Table 2):
 
 ```bash
-conda run -n dpm3d python scripts/train_ae.py \
-    --data_root data/shapenet \
+python scripts/train_ae.py \
+    --data_path data/shapenet/shapenet.hdf5 \
     --save_dir checkpoints/ae
 ```
 
-**Evaluate reconstruction** (input vs. reconstructed, with Chamfer Distance):
+**Train generative model** (Table 1):
 
 ```bash
-conda run -n dpm3d python scripts/reconstruct.py \
-    --data_root data/shapenet \
+# GaussianVAE (simpler prior)
+python scripts/train_gen.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --model gaussian \
+    --save_dir checkpoints/gen
+
+# FlowVAE (learned prior, paper's main result)
+python scripts/train_gen.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --model flow \
+    --save_dir checkpoints/gen
+```
+
+**Qualitative: reconstruct input point clouds**:
+
+```bash
+python scripts/reconstruct.py \
+    --data_path data/shapenet/shapenet.hdf5 \
     --ckpt checkpoints/ae/epoch_2000.pt \
     --out_dir results/reconstruct
 ```
 
-**Train generative model**:
+**Qualitative: generate new shapes**:
 
 ```bash
-# GaussianVAE (simpler prior)
-conda run -n dpm3d python scripts/train_gen.py \
-    --data_root data/shapenet --model gaussian
-
-# FlowVAE (learned prior)
-conda run -n dpm3d python scripts/train_gen.py \
-    --data_root data/shapenet --model flow
-```
-
-**Generate new shapes**:
-
-```bash
-conda run -n dpm3d python scripts/generate.py \
+python scripts/generate.py \
     --ckpt checkpoints/gen/flow_epoch_2000.pt \
     --model flow \
     --out_dir results/generate
 ```
+
+**Quantitative: Table 2 — AutoEncoder reconstruction (CD / EMD)**:
+
+```bash
+python scripts/eval_ae.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --ckpt checkpoints/ae/epoch_2000.pt \
+    --cates airplane chair car \
+    --out_dir results/eval_ae
+```
+
+**Quantitative: Table 1 — Generation quality (MMD / COV / 1-NNA)**:
+
+```bash
+python scripts/eval_gen.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --ckpt checkpoints/gen/flow_epoch_2000.pt \
+    --model flow \
+    --cates airplane chair car \
+    --out_dir results/eval_gen
+```
+
+> **Note on EMD**: both eval scripts use `geomloss` Sinkhorn approximation in place of the original `approxmatch.cu` CUDA kernel (incompatible with PyTorch 2.x / CUDA 13+). Both are approximate optimal transport solvers of comparable accuracy. Pass `--no_emd` to skip EMD computation during debugging.
 
 ---
 
@@ -135,15 +178,17 @@ conda run -n dpm3d python scripts/generate.py \
 ```
 DPM_3D/
 ├── model.py              All nn.Module definitions
-├── dataset.py            ShapeNet data loading
-├── metrics.py            Chamfer Distance
+├── dataset.py            ShapeNet data loading (single HDF5 file)
+├── metrics.py            CD, EMD, MMD, COV, 1-NNA
 ├── visualize.py          3D point cloud visualization
 ├── tests/                Per-module verification scripts
 ├── scripts/
 │   ├── train_ae.py       AutoEncoder training
 │   ├── train_gen.py      GaussianVAE / FlowVAE training
-│   ├── reconstruct.py    Reconstruction evaluation
-│   └── generate.py       Generation diversity showcase
+│   ├── reconstruct.py    Qualitative reconstruction (input vs. reconstructed)
+│   ├── generate.py       Qualitative generation diversity showcase
+│   ├── eval_ae.py        Table 2: per-category CD / EMD on test set
+│   └── eval_gen.py       Table 1: MMD / COV / 1-NNA vs. test set
 └── docs/
     ├── code_guide/       Per-module walkthroughs (math + code)
     └── notes/            Study notes: paper deep-dives, PyTorch patterns, roadmap
