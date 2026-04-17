@@ -686,3 +686,100 @@ class GaussianVAE(nn.Module):
 
         # 逆向扩散生成点云: z → x^(T) → x^(T-1) → ... → x^(0)
         return self.diffusion.sample(z, num_points, flexibility)  # (B, N, 3)
+
+
+# =============================================================================
+# Phase 5-B: AffineCouplingLayer
+# 作用: Flow 的基本单元——单步可逆仿射变换，同时输出 log|det J|
+# 对应论文: Section 4.4, Appendix
+# =============================================================================
+
+
+class AffineCouplingLayer(nn.Module):
+    """
+    单层仿射耦合变换。
+
+    把输入 x: (B, zdim) 劈成两半 [x1, x2]：
+      - 不动的那半（由 flip 决定）作为"条件"输入 s_net / t_net
+      - 另一半做仿射变换
+
+    正向（生成方向，reverse=False）：x1, x2 → z1, z2
+        z1 = x1
+        z2 = x2 ⊙ exp(s(x1)) + t(x1)
+        log|det J| = sum(s(x1))          ← s 各分量之和，O(d)
+
+    逆向（推断方向，reverse=True）：z1, z2 → x1, x2
+        x1 = z1
+        x2 = (z2 - t(z1)) ⊙ exp(-s(z1))
+        log|det J| = -sum(s(z1))
+
+    注意：s_net 和 t_net 始终做前向传播，不需要被"反转"。
+    可逆性来自仿射运算本身，而非网络结构。
+    """
+
+    def __init__(self, zdim: int, hidden_dim: int = 128, flip: bool = False):
+        """
+        Args:
+            zdim      : latent 维度（必须为偶数）
+            hidden_dim: s/t 网络的隐层宽度
+            flip      : False → 前半不动；True → 后半不动（交替层用）
+        """
+        super().__init__()
+        self.flip = flip
+        d_half = zdim // 2
+
+        # s_net: d_half → hidden_dim → d_half，Tanh 限幅防止 exp(s) 初始爆炸
+        self.s_net = nn.Sequential(
+            nn.Linear(d_half, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, d_half),
+            nn.Tanh(),
+        )
+
+        # t_net: d_half → hidden_dim → d_half，平移偏置无需限幅
+        self.t_net = nn.Sequential(
+            nn.Linear(d_half, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, d_half),
+        )
+
+    def forward(self, x: torch.Tensor, reverse: bool = False):
+        """
+        Args:
+            x      : (B, zdim)  输入向量
+            reverse: False=正向生成（u→z），True=逆向推断（z→u）
+
+        Returns:
+            y      : (B, zdim)  变换后的向量
+            log_det: (B,)       log|det J|，正向为正，逆向为负
+        """
+        # Step 1: 劈成两半，x1 不动（作为条件），x2 被变换
+        # flip=False: x1=前半, x2=后半
+        # flip=True : x1=后半, x2=前半（交替层使每维都有机会被变换）
+        x_a, x_b = x.chunk(2, dim=-1)  # 各 (B, d_half)
+        x1, x2 = (x_b, x_a) if self.flip else (x_a, x_b)
+
+        # Step 2: s 和 t 网络始终正向传播，输入固定为不动的那半 x1
+        s = self.s_net(x1)  # (B, d_half)，经 Tanh 限幅
+        t = self.t_net(x1)  # (B, d_half)
+
+        # Step 3: 仿射变换（正向）或其逆（逆向）
+        # 正向: y2 = x2 ⊙ exp(s) + t
+        # 逆向: y2 = (x2 - t) ⊙ exp(-s)
+        if reverse:
+            y2 = (x2 - t) * torch.exp(-s)
+        else:
+            y2 = x2 * torch.exp(s) + t
+
+        # Step 4: 还原拼接顺序（flip=True 时 y2 是前半，x1 是后半）
+        y_a, y_b = (y2, x1) if self.flip else (x1, y2)
+        y = torch.cat([y_a, y_b], dim=-1)  # (B, zdim)
+
+        # Step 5: log|det J| = ±sum(s)，符号由方向决定，与 flip 无关
+        # 正向 Jacobian 下三角，det = exp(sum(s))，取 log 得 sum(s)
+        # 逆向是正向的逆变换，log|det| 取反
+
+        sign = -1 if reverse else 1
+        log_det = sign * s.sum(dim=-1)  # (B,)
+
+        return y, log_det
