@@ -1,0 +1,19 @@
+# Core deep learning
+# Install PyTorch separately with the correct CUDA wheel (see README / roadmap server setup):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# cu124 wheels work on CUDA 12.x drivers (tested on 12.8).
+
+# Data / numerics
+numpy
+scipy
+scikit-learn
+
+# Visualisation
+matplotlib
+
+# Training utilities
+tqdm
+
+# Evaluation metrics (Phase 7)
+# EMD via Sinkhorn approximation — pure-PyTorch backend, no pykeops required
+geomloss

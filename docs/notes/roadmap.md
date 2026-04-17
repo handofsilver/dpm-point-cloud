@@ -120,7 +120,7 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 ---
 
-### Phase 6 — 评估与可视化
+### Phase 6 — 评估与可视化（定性，已完成）
 
 | # | 任务 | 文件 | 状态 |
 |---|---|---|---|
@@ -137,12 +137,85 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 ---
 
+### Phase 7 — 定量复现（Table 1 & Table 2）
+
+> **目标**：复现论文 Table 1（生成模型，FlowVAE）和 Table 2（AutoEncoder 重建）的数字。
+> 其他方法（AtlasNet、PointFlow 等）的数字直接从论文抄录，只跑 Ours 行。
+
+#### 7-A：CD 和 EMD 底层实现（前提）
+
+原始仓库的 `emd-cd` 分支依赖一个需手动编译的 CUDA 扩展（`approxmatch.cu`），其 Makefile 硬编码了 CUDA 10.0 / Python 3.7 / `caffe2` 库，**在 PyTorch 2.x + CUDA 13.0 环境下无法编译**。
+
+**选定方案：用现代 pip 库替代，精度等价，无需编译 CUDA 扩展。**
+
+| 指标 | 原始实现 | 替代方案 | 精度说明 |
+|---|---|---|---|
+| CD | `nndistance.cu`（双向最近邻） | `chamfer-distance`（pip 直装） | 完全等价，同一算法 |
+| EMD | `approxmatch.cu`（近似匈牙利） | `geomloss` 的 `SamplesLoss("sinkhorn")` | 同为近似最优传输，误差量级相当，数值可比 |
+
+> **注**：Table 1 中 DPM-3D 的核心优势体现在 EMD 列，不能省略。报告中需加脚注说明 EMD 使用 Sinkhorn 近似替代原 approxmatch kernel，这是复现工作的标准做法。
+
+| 任务 | 文件 | 状态 |
+|---|---|---|
+| 安装 `chamfer-distance` 和 `geomloss` | `requirements.txt` 或 pip | ⬜ 待完成 |
+| 用新库重写 `metrics.py` 中的 CD，新增 EMD 函数 | `metrics.py` | ⬜ 待实现 |
+
+#### 7-B：Table 2 定量评估（AutoEncoder，重建质量）
+
+Table 2 报告每个类别在测试集上的 mean CD 和 mean EMD（×10³ 等比例放大）。
+
+| 任务 | 文件 | 状态 |
+|---|---|---|
+| 实现全测试集评估脚本 | `scripts/eval_ae.py` | ⬜ 待实现 |
+| 在 chair/airplane/car 上跑出数字 | — | ⬜ 待训练 + 推理 |
+
+**`eval_ae.py` 职责**：遍历测试集 → encode → diffusion sample → 逐样本 CD/EMD → 打印 per-category 均值（对照论文放大系数）
+
+#### 7-C：Table 1 所需集合级指标（生成质量）
+
+Table 1 使用 6 个数字：MMD-CD、MMD-EMD、COV-CD、COV-EMD、1-NNA-CD、1-NNA-EMD。
+
+这三个指标均为**集合对集合**的比较，不是 per-sample 的距离。
+
+| 指标 | 含义 | 状态 |
+|---|---|---|
+| **MMD**（Min. Matching Distance） | 每个生成样本找测试集中最近邻，取均值；衡量生成质量/保真度 | ⬜ 待实现（`metrics.py`）|
+| **COV**（Coverage） | 测试集中被至少一个生成样本"命中"的比例；衡量多样性 | ⬜ 待实现（`metrics.py`）|
+| **1-NNA**（1-Nearest Neighbor Accuracy） | 生成集 + 测试集混合，用 1-NN 分类器判断能否区分；越接近 50% 越好 | ⬜ 待实现（`metrics.py`）|
+
+#### 7-D：Table 1 生成评估脚本
+
+| 任务 | 文件 | 状态 |
+|---|---|---|
+| 实现 `eval_gen.py`：大批量采样 → 计算 MMD/COV/1-NNA | `scripts/eval_gen.py` | ⬜ 待实现 |
+| 在 chair/airplane/car 上跑出数字 | — | ⬜ 待训练 + 推理 |
+
+**`eval_gen.py` 职责**：
+1. 从训练好的 FlowVAE 先验采样生成集 S_g（通常 2048 个形状）
+2. 加载对应类别测试集 S_r
+3. 调用 MMD/COV/1-NNA 函数，分别用 CD 和 EMD 各算一遍
+4. 打印结果表格
+
+#### 工作量汇总
+
+| 阶段 | 核心工作 | 预估难度 |
+|---|---|---|
+| 7-A | EMD 实现（近似版本） | ★★★（算法复杂，需借助外部实现或自写近似） |
+| 7-B | `eval_ae.py` + 跑 Table 2 | ★★（脚本简单，主要是 compute time） |
+| 7-C | MMD / COV / 1-NNA 实现 | ★★（逻辑不复杂，但要处理大矩阵，注意内存） |
+| 7-D | `eval_gen.py` + 跑 Table 1 | ★★（脚本简单，主要是 compute time） |
+
+> **关键路径**：7-A（EMD）是阻塞项，7-B / 7-C / 7-D 都依赖它。建议先搞定 EMD，再并行推进其余。
+
+---
+
 ## 文件结构（目标状态）
 
 ```
 DPM_3D/
 ├── model.py              所有 nn.Module 定义
 ├── dataset.py            ShapeNet 数据加载
+├── metrics.py            CD、EMD、MMD、COV、1-NNA
 ├── docs/
 │   ├── code_guide/       每个组件的导读文档（LaTeX + 代码）
 │   ├── notes/            学习笔记（pytorch_notes, paper_deep_dive, 本文档）
@@ -150,7 +223,9 @@ DPM_3D/
 ├── tests/                每个组件的独立验证脚本
 └── scripts/
     ├── train_ae.py       AutoEncoder 训练入口
-    └── train_gen.py      生成模型训练入口
+    ├── train_gen.py      生成模型训练入口
+    ├── eval_ae.py        Table 2 定量评估（重建 CD/EMD）
+    └── eval_gen.py       Table 1 定量评估（MMD/COV/1-NNA）
 ```
 
 ---

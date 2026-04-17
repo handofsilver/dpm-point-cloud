@@ -1,0 +1,21 @@
+name: dpm3d
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    # PyTorch cu124 — compatible with CUDA 12.x drivers (12.4–12.8)
+    - --extra-index-url https://download.pytorch.org/whl/cu124
+    - torch
+    - torchvision
+    # numerics / data
+    - numpy
+    - scipy
+    - scikit-learn
+    # visualisation
+    - matplotlib
+    # training utilities
+    - tqdm
+    # evaluation: EMD via Sinkhorn approximation (Phase 7)
+    - geomloss
