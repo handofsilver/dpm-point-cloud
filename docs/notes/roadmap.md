@@ -122,12 +122,18 @@ VarianceSchedule                  ← 纯数学常数表，无参数
 
 ### Phase 6 — 评估与可视化
 
-| # | 任务 | 状态 |
+| # | 任务 | 文件 | 状态 |
+|---|---|---|---|
+| 6-A | 点云 3D 可视化 | `visualize.py` | ✅ 完成 |
+| 6-B | Chamfer Distance 实现 | `metrics.py` | ✅ 完成 |
+| 6-C | 重建效果定性对比（输入 vs 重建） | `scripts/reconstruct.py` | ✅ 完成 |
+| 6-D | 生成多样性定性展示 | `scripts/generate.py` | ✅ 完成 |
+
+**补齐测试**：
+
+| 组件 | 测试文件 | 状态 |
 |---|---|---|
-| 6-A | 点云 3D 可视化（matplotlib/open3d） | 🔲 待实现 |
-| 6-B | Chamfer Distance 实现 | 🔲 待实现 |
-| 6-C | 重建效果定性对比（输入 vs 重建） | 🔲 待实现 |
-| 6-D | 生成多样性定性展示 | 🔲 待实现 |
+| `DiffusionPoint` | `tests/test_diffusion_point.py` | ✅ 完成 |
 
 ---
 
