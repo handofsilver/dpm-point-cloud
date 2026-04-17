@@ -14,28 +14,63 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-
 # synsetid → 类别名称映射（完整 ShapeNet 55 类）
 SYNSET_TO_CATE = {
-    '02691156': 'airplane', '02773838': 'bag', '02801938': 'basket',
-    '02808440': 'bathtub', '02818832': 'bed', '02828884': 'bench',
-    '02876657': 'bottle', '02880940': 'bowl', '02924116': 'bus',
-    '02933112': 'cabinet', '02747177': 'can', '02942699': 'camera',
-    '02954340': 'cap', '02958343': 'car', '03001627': 'chair',
-    '03046257': 'clock', '03207941': 'dishwasher', '03211117': 'monitor',
-    '04379243': 'table', '04401088': 'telephone', '02946921': 'tin_can',
-    '04460130': 'tower', '04468005': 'train_obj', '03085013': 'keyboard',
-    '03261776': 'earphone', '03325088': 'faucet', '03337140': 'file',
-    '03467517': 'guitar', '03513137': 'helmet', '03593526': 'jar',
-    '03624134': 'knife', '03636649': 'lamp', '03642806': 'laptop',
-    '03691459': 'speaker', '03710193': 'mailbox', '03759954': 'microphone',
-    '03761084': 'microwave', '03790512': 'motorcycle', '03797390': 'mug',
-    '03928116': 'piano', '03938244': 'pillow', '03948459': 'pistol',
-    '03991062': 'pot', '04004475': 'printer', '04074963': 'remote_control',
-    '04090263': 'rifle', '04099429': 'rocket', '04225987': 'skateboard',
-    '04256520': 'sofa', '04330267': 'stove', '04530566': 'vessel',
-    '04554684': 'washer', '02992529': 'cellphone',
-    '02843684': 'birdhouse', '02871439': 'bookshelf',
+    "02691156": "airplane",
+    "02773838": "bag",
+    "02801938": "basket",
+    "02808440": "bathtub",
+    "02818832": "bed",
+    "02828884": "bench",
+    "02876657": "bottle",
+    "02880940": "bowl",
+    "02924116": "bus",
+    "02933112": "cabinet",
+    "02747177": "can",
+    "02942699": "camera",
+    "02954340": "cap",
+    "02958343": "car",
+    "03001627": "chair",
+    "03046257": "clock",
+    "03207941": "dishwasher",
+    "03211117": "monitor",
+    "04379243": "table",
+    "04401088": "telephone",
+    "02946921": "tin_can",
+    "04460130": "tower",
+    "04468005": "train_obj",
+    "03085013": "keyboard",
+    "03261776": "earphone",
+    "03325088": "faucet",
+    "03337140": "file",
+    "03467517": "guitar",
+    "03513137": "helmet",
+    "03593526": "jar",
+    "03624134": "knife",
+    "03636649": "lamp",
+    "03642806": "laptop",
+    "03691459": "speaker",
+    "03710193": "mailbox",
+    "03759954": "microphone",
+    "03761084": "microwave",
+    "03790512": "motorcycle",
+    "03797390": "mug",
+    "03928116": "piano",
+    "03938244": "pillow",
+    "03948459": "pistol",
+    "03991062": "pot",
+    "04004475": "printer",
+    "04074963": "remote_control",
+    "04090263": "rifle",
+    "04099429": "rocket",
+    "04225987": "skateboard",
+    "04256520": "sofa",
+    "04330267": "stove",
+    "04530566": "vessel",
+    "04554684": "washer",
+    "02992529": "cellphone",
+    "02843684": "birdhouse",
+    "02871439": "bookshelf",
 }
 CATE_TO_SYNSET = {v: k for k, v in SYNSET_TO_CATE.items()}
 
@@ -64,7 +99,7 @@ class ShapeNetDataset(Dataset):
         self,
         path: str,
         split: str = "train",
-        cates: list = None,
+        cates: list = None,  # type: ignore
         num_points: int = 2048,
         random_seed: int = 2020,
     ):
@@ -102,15 +137,17 @@ class ShapeNetDataset(Dataset):
             )
 
             for synsetid in synsets_to_load:
-                if split not in f[synsetid]:
+                if split not in f[synsetid]:  # type: ignore
                     continue
                 # f[synsetid][split]: (N, 2048, 3)
-                pcs = f[synsetid][split][...]  # 触发实际读取，返回 ndarray
+                pcs = f[synsetid][split][...]  # type: ignore # 触发实际读取，返回 ndarray
                 cate_name = SYNSET_TO_CATE.get(synsetid, synsetid)
-                for pc in pcs:
+                for pc in pcs:  # type: ignore
                     self.samples.append({"pointcloud": pc, "cate": cate_name})
 
-        assert len(self.samples) > 0, f"从 {path} 读取到 0 条数据，请检查 split={split} 和 cates={cates}"
+        assert (
+            len(self.samples) > 0
+        ), f"从 {path} 读取到 0 条数据，请检查 split={split} 和 cates={cates}"
 
         # 确定性 shuffle（与原仓库保持一致，保证训练/测试集划分可复现）
         random.Random(random_seed).shuffle(self.samples)
@@ -140,8 +177,8 @@ class ShapeNetDataset(Dataset):
             pc = pc[choice]
 
         # shape_unit 归一化
-        pc -= pc.mean(axis=0)   # 零均值
-        pc /= pc.std()          # 单位方差（全局 std，保持 xyz 比例）
+        pc -= pc.mean(axis=0)  # 零均值
+        pc /= pc.std()  # 单位方差（全局 std，保持 xyz 比例）
 
         return {
             "pointcloud": torch.from_numpy(pc).float(),  # (num_points, 3)
