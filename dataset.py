@@ -176,11 +176,14 @@ class ShapeNetDataset(Dataset):
             choice = np.random.choice(pc.shape[0], self.num_points, replace=False)
             pc = pc[choice]
 
-        # shape_unit 归一化
-        pc -= pc.mean(axis=0)  # 零均值
-        pc /= pc.std()  # 单位方差（全局 std，保持 xyz 比例）
+        # shape_unit 归一化，记录 shift/scale 供反归一化
+        shift = pc.mean(axis=0)  # (3,)  各轴均值
+        scale = pc.std()  # scalar  全局 std
+        pc = (pc - shift) / scale
 
         return {
             "pointcloud": torch.from_numpy(pc).float(),  # (num_points, 3)
+            "shift": torch.from_numpy(shift).float(),  # (3,)
+            "scale": torch.tensor(scale, dtype=torch.float32),  # scalar
             "cate": sample["cate"],
         }
