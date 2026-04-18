@@ -71,9 +71,9 @@ def plot_reconstruction(
     """
     # figsize=(宽, 高)，单位英寸；10×5 刚好放两个并排子图
     fig = plt.figure(figsize=(10, 5))
-    # add_subplot(行数, 列数, 第几个)：1行2列网格，分别取第1、第2个子图
-    ax1 = fig.add_subplot(nrows=1, ncols=2, index=1, projection="3d")
-    ax2 = fig.add_subplot(nrows=1, ncols=2, index=2, projection="3d")
+    # add_subplot(行, 列, 子图序号)；勿用 nrows/ncols/index 关键字，部分 matplotlib 版本会误传给 Axes.set()
+    ax1 = fig.add_subplot(1, 2, 1, projection="3d")
+    ax2 = fig.add_subplot(1, 2, 2, projection="3d")
 
     plot_point_cloud(input_pc, title="Input", ax=ax1)
     plot_point_cloud(recon_pc, title="Reconstruction", ax=ax2)
