@@ -40,6 +40,22 @@ from model import (
 from metrics import compute_all_metrics
 
 
+def normalize_to_bbox(pcs: torch.Tensor) -> torch.Tensor:
+    """
+    Per-shape 归一化到 [-1, 1]^3 bbox（ShapeGF / 论文 Sec 5.2 协议）。
+
+    取外接 bbox 最长轴做均匀缩放：最长轴正好落在 [-1, 1]，其他轴更短。
+    ref 和 gen 必须各自做一次，保证指标只比较形状不比较绝对尺度。
+
+    pcs: (B, N, 3)  ->  (B, N, 3)
+    """
+    pc_max = pcs.max(dim=1, keepdim=True).values  # (B, 1, 3)
+    pc_min = pcs.min(dim=1, keepdim=True).values  # (B, 1, 3)
+    shift = (pc_min + pc_max) / 2  # (B, 1, 3)  bbox 中心
+    scale = (pc_max - pc_min).max(dim=-1, keepdim=True).values / 2  # (B, 1, 1) 最长轴半长
+    return (pcs - shift) / scale
+
+
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_path", type=str, required=True, help="shapenet.hdf5 路径")
@@ -142,6 +158,10 @@ def main():
         sample_pcs = sample_generated(model, num_samples, args, device)  # (S, N, 3)
 
         print(f"[{cate}] 计算 MMD / COV / 1-NNA...")
+        # 论文 Sec 5.2 协议：ref 和 gen 都归一化到 [-1,1]^3 bbox 再算指标
+        # （JSD 的 voxel 直方图也依赖这组归一化，必须统一）
+        sample_pcs = normalize_to_bbox(sample_pcs)
+        ref_pcs = normalize_to_bbox(ref_pcs)
         results = compute_all_metrics(
             sample_pcs=sample_pcs.to(device),
             ref_pcs=ref_pcs.to(device),
@@ -158,7 +178,7 @@ def main():
     keys_emd = ["MMD-EMD", "COV-EMD", "1-NNA-EMD"]
     use_emd = not args.no_emd
 
-    col_keys = keys_cd + (keys_emd if use_emd else [])
+    col_keys = keys_cd + (keys_emd if use_emd else []) + ["JSD"]
     header = f"{'Category':<12}" + "".join(f"  {k:>12}" for k in col_keys)
 
     print(f"\n{'='*len(header)}")
