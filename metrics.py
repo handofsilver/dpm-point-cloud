@@ -1,12 +1,18 @@
 """
-评估指标：CD、EMD，以及集合级指标 MMD、COV、1-NNA。
+评估指标：CD、EMD，以及集合级指标 MMD、COV、1-NNA、JSD。
 
 注：EMD 使用 geomloss 的 Sinkhorn 近似（替代原论文的 approxmatch.cu CUDA kernel）。
 两者均为近似最优传输，误差量级相当，数值可比。报告时需加脚注说明。
+
+JSD 来自 Achlioptas et al. 2018（原论文 [25]），把点云集合投影到
+28^3 体素占据直方图，再算 Jensen-Shannon Divergence。
 """
 
+import numpy as np
 import torch
 from geomloss import SamplesLoss
+from scipy.stats import entropy
+from sklearn.neighbors import NearestNeighbors
 
 # Sinkhorn EMD 全局实例：p=1 对应 Wasserstein-1（即 EMD），blur 控制近似精度
 # blur=0.05 是点云评估的常用值，越小越精确但越慢、越容易数值不稳定
@@ -187,23 +193,142 @@ def _mmd_cov_1nna(
     }
 
 
+# ---------------------------------------------------------------------------
+# JSD：体素占据分布距离
+# ---------------------------------------------------------------------------
+
+
+def _unit_cube_grid(resolution: int, clip_sphere: bool = True) -> np.ndarray:
+    """
+    生成单位立方体 [-0.5, 0.5]^3 内均匀网格的中心坐标。
+
+    Args:
+        resolution:  每轴格数，总共 resolution^3 个格子
+        clip_sphere: True 时裁掉外接球以外的角落格（与原论文实现一致）
+
+    Returns:
+        coords: (G, 3)  网格中心坐标，G <= resolution^3
+    """
+    spacing = 1.0 / float(resolution - 1)
+    # 用 meshgrid 生成所有格子中心，坐标范围 [-0.5, 0.5]
+    axes = np.linspace(-0.5, 0.5, resolution, dtype=np.float32)
+    grid = np.stack(np.meshgrid(axes, axes, axes, indexing="ij"), axis=-1)  # (R, R, R, 3)
+    coords = grid.reshape(-1, 3)  # (R^3, 3)
+    if clip_sphere:
+        # 保留到原点距离 <= 0.5 的格子（与 bbox 内切球一致）
+        coords = coords[np.linalg.norm(coords, axis=1) <= 0.5 + spacing]
+    return coords  # (G, 3)
+
+
+def _occupancy_distribution(
+    pcs: np.ndarray,
+    grid_coords: np.ndarray,
+) -> np.ndarray:
+    """
+    给定点云集合，统计每个体素格子被多少个点云"碰到过"（Bernoulli 计数）。
+
+    每个点云对每个格子最多贡献 1（不是总点数，是命中该格的点云数），
+    这样得到的向量可以归一化为整个集合的空间占据概率分布。
+
+    Args:
+        pcs:         (S, N, 3)  S 个点云，每个 N 点，坐标在 [-0.5, 0.5]^3
+        grid_coords: (G, 3)    体素格中心（来自 _unit_cube_grid）
+
+    Returns:
+        dist: (G,)  每格被命中的点云数（未归一化整数计数）
+    """
+    # 在格子中心上建 kd-tree，查询"每个点属于哪个格子"
+    nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree").fit(grid_coords)
+
+    dist = np.zeros(len(grid_coords), dtype=np.float32)  # (G,)
+
+    for pc in pcs:  # pc: (N, 3)
+        _, indices = nn.kneighbors(pc)  # indices: (N, 1) 每个点最近格子的编号
+        # unique：同一格子只计一次（Bernoulli，不是频率计数）
+        unique_indices = np.unique(indices)
+        dist[unique_indices] += 1
+
+    return dist  # (G,)
+
+
+def _jensen_shannon_div(P: np.ndarray, Q: np.ndarray) -> float:
+    """
+    计算两个非负向量之间的 Jensen-Shannon Divergence（以 2 为底，单位 bit）。
+
+    JSD(P||Q) = H( (P+Q)/2 ) - ( H(P) + H(Q) ) / 2
+
+    其中 H 是香农熵。JSD 是 KL 散度的对称化版本，范围 [0, 1]。
+
+    Args:
+        P: (G,)  分布 1，未归一化非负向量
+        Q: (G,)  分布 2，未归一化非负向量
+
+    Returns:
+        jsd: float ∈ [0, 1]
+    """
+    # 归一化为概率分布（各自除以自身总和）
+    P_ = P / P.sum()  # (G,)
+    Q_ = Q / Q.sum()  # (G,)
+
+    # scipy.stats.entropy 自动跳过 p=0 的项（避免 log(0)），以 2 为底输出 bit
+    H_P = entropy(P_, base=2)
+    H_Q = entropy(Q_, base=2)
+    H_mix = entropy((P_ + Q_) / 2.0, base=2)
+
+    return float(H_mix - (H_P + H_Q) / 2.0)
+
+
+def jsd_between_point_cloud_sets(
+    sample_pcs: torch.Tensor,
+    ref_pcs: torch.Tensor,
+    resolution: int = 28,
+) -> float:
+    """
+    计算两组点云集合之间的 JSD（论文 Table 1 第四列）。
+
+    点云必须已归一化到 [-1, 1]^3（由 eval_gen.normalize_to_bbox 保证）。
+    内部将坐标缩到 [-0.5, 0.5]^3 再与体素网格匹配（保持与原论文实现一致）。
+
+    Args:
+        sample_pcs: (S, N, 3)  生成集（torch.Tensor，CPU 或 GPU）
+        ref_pcs:    (R, N, 3)  参考集（torch.Tensor，CPU 或 GPU）
+        resolution: 体素网格每轴格数，默认 28（与原论文一致）
+
+    Returns:
+        jsd: float
+    """
+    # 转为 numpy，缩放 [-1,1]^3 → [-0.5,0.5]^3（与 _unit_cube_grid 的坐标系对齐）
+    s_np = sample_pcs.cpu().numpy() / 2.0  # (S, N, 3)
+    r_np = ref_pcs.cpu().numpy() / 2.0  # (R, N, 3)
+
+    grid = _unit_cube_grid(resolution, clip_sphere=True)  # (G, 3)
+
+    P = _occupancy_distribution(s_np, grid)  # (G,) sample 分布
+    Q = _occupancy_distribution(r_np, grid)  # (G,) ref 分布
+
+    return _jensen_shannon_div(P, Q)
+
+
 def compute_all_metrics(
     sample_pcs: torch.Tensor,
     ref_pcs: torch.Tensor,
     batch_size: int = 64,
     use_emd: bool = True,
+    use_jsd: bool = True,
 ) -> dict:
     """
-    计算 Table 1 所需的全部集合级指标：MMD、COV、1-NNA × CD/EMD = 6 个数字。
+    计算 Table 1 所需的全部集合级指标：
+      MMD、COV、1-NNA × CD/EMD（6 个）+ JSD（1 个）= 7 个数字。
 
     Args:
-        sample_pcs: (S, N, 3)  生成集
-        ref_pcs:    (R, N, 3)  参考集（测试集）
+        sample_pcs: (S, N, 3)  生成集，已归一化到 [-1,1]^3
+        ref_pcs:    (R, N, 3)  参考集（测试集），已归一化到 [-1,1]^3
         batch_size: 成对 CD 计算的批大小
         use_emd:    是否同时计算 EMD 版指标（慢，调试时可设 False）
+        use_jsd:    是否计算 JSD（需要 _occupancy_distribution 实现完成）
 
     Returns:
-        dict，key 形如 "MMD-CD"、"COV-EMD" 等
+        dict，key 形如 "MMD-CD"、"COV-EMD"、"JSD" 等
     """
     results = {}
 
@@ -219,5 +344,9 @@ def compute_all_metrics(
         M_rr_e = _pairwise_emd(ref_pcs, ref_pcs)
         M_ss_e = _pairwise_emd(sample_pcs, sample_pcs)
         results.update(_mmd_cov_1nna(M_sr_e, M_rr_e, M_ss_e, suffix="EMD"))
+
+    if use_jsd:
+        print("Computing JSD...")
+        results["JSD"] = jsd_between_point_cloud_sets(sample_pcs, ref_pcs)
 
     return results
