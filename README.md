@@ -210,6 +210,51 @@ Additional notes:
 
 ---
 
+## Results vs. Paper
+
+> **Note on comparability**: The paper's released pretrained weights (e.g. `AE_all.pt`) were trained on `ShapeNetCore.v2.PC15k.Resplit` — this is directly confirmed from the checkpoint's `args.dataset_dir`. Paper Table 2's reported numbers most plausibly come from evaluating those same checkpoints on the same dataset's test split (the paper text doesn't name the eval file explicitly, but this is the natural reading since that's where the released weights came from). `ShapeNetCore.v2.PC15k.Resplit` is **not** included in the Google Drive release — only `shapenet.hdf5` (2048 points/shape, airplane per-shape std ≈ 0.115, measured) is. This repo trains and evaluates on `shapenet.hdf5`.
+>
+> We empirically verified — by running the paper's official `AE_all.pt` through our eval pipeline on `shapenet.hdf5` — that the ~10× AE CD gap is attributable to **the evaluation dataset, not training quality**. See [`docs/notes/dataset_investigation.md`](docs/notes/dataset_investigation.md) §5 for the decisive experiment and §6 for the mechanism. **Relative trends across categories are comparable; absolute values are not.**
+
+### Table 2 — AutoEncoder Reconstruction
+
+Paper units: CD ×10³, EMD ×10². Our units: CD ×10³, EMD ×10³ (Sinkhorn approximation; see note below).
+
+**Paper Table 2** (trained on PC15k, evaluated on PC15k):
+
+| Category | CD (paper) | EMD (paper) | Oracle CD | Oracle EMD |
+|----------|-----------|------------|----------|-----------|
+| Airplane | 2.118 | 2.876 | 1.016 | 2.141 |
+| Car      | 5.493 | 3.937 | 3.917 | 3.246 |
+| Chair    | 5.677 | 4.153 | 3.221 | 3.281 |
+| ShapeNet | 5.252 | 3.783 | 3.074 | 3.112 |
+
+**On `shapenet.hdf5`** (after `shape_unit` denormalization — this repo's eval pipeline):
+
+| Category | Our `epoch_2000.pt` CD×10³ | Our EMD×10³ | Official `AE_all.pt` CD×10³ |
+|----------|:--------------------------:|:-----------:|:---------------------------:|
+| Airplane | 0.178 | 1.871 | **0.1949** |
+| Car      | 0.577 | 2.093 | **0.5923** |
+| Chair    | 0.511 | 3.486 | **0.5521** |
+
+The official weights (rightmost column) give the same order of magnitude as our self-trained model on `shapenet.hdf5`, while both are ~10× smaller than paper Table 2 — ruling out undertraining and pinning the gap to the dataset.
+
+### Table 1 — Generation Quality (in progress)
+
+Paper units: CD ×10³, EMD ×10¹, JSD ×10³.
+
+| Category | MMD-CD | MMD-EMD | COV-CD (%) | COV-EMD (%) | 1-NNA-CD (%) | 1-NNA-EMD (%) | JSD   |
+|----------|--------|---------|------------|-------------|--------------|---------------|-------|
+| Airplane | 3.276  | 1.061   | 48.71      | 45.47       | 64.83        | 75.12         | 1.067 |
+| Chair    | 12.276 | 1.784   | 48.94      | 47.52       | 60.11        | 69.06         | 7.797 |
+
+> **Our Gen models are still training; results will be filled in when available.** Expected behavior (same mechanism as AE — see [investigation §7](docs/notes/dataset_investigation.md)):
+> - **MMD-CD / MMD-EMD** — absolute distance metrics, will be systematically smaller than paper (same ~10× scale effect).
+> - **COV / 1-NNA** — ratio / classification metrics, scale-invariant, should land close to paper numbers.
+> - The paper's Table 1 protocol additionally normalizes both generated and reference point clouds into `[−1,1]³` bbox before computing metrics (Section 5.2, following ShapeGF). `scripts/eval_gen.py` does not currently do this — so MMD absolute values won't match paper even without the dataset-scale effect.
+
+> **EMD note**: the paper uses the CUDA `approxmatch.cu` kernel (from PC-GAN); this repo uses `geomloss` Sinkhorn approximation for PyTorch 2.x compatibility. Both are approximate optimal transport solvers but produce systematically different values — EMD numbers are not directly comparable.
+
 ## Citation
 
 ```bibtex
