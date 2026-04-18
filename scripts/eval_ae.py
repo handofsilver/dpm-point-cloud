@@ -79,7 +79,9 @@ def main():
         print(f"[{cate}] {len(dataset)} samples")
 
         for batch in loader:
-            x0 = batch["pointcloud"].to(device)  # (B, N, 3)
+            x0 = batch["pointcloud"].to(device)  # (B, N, 3)  归一化坐标
+            shift = batch["shift"].to(device)  # (B, 3)
+            scale = batch["scale"].to(device)  # (B,)
 
             with torch.no_grad():
                 # AutoEncoder 模式：取 mu 作为确定性 latent
@@ -88,13 +90,20 @@ def main():
                     z=mu,
                     num_points=args.num_points,
                     flexibility=args.flexibility,
-                )  # (B, N, 3)
+                )  # (B, N, 3)  归一化坐标
 
-            cd = chamfer_distance(x0, recon)  # (B,)
+            # 反归一化：还原到原始坐标系，与论文 Table 2 对齐
+            # scale: (B,) → (B, 1, 1)，shift: (B, 3) → (B, 1, 3)
+            s = scale.view(-1, 1, 1)
+            sh = shift.unsqueeze(1)
+            x0_orig = x0 * s + sh  # (B, N, 3)
+            recon_orig = recon * s + sh  # (B, N, 3)
+
+            cd = chamfer_distance(x0_orig, recon_orig)  # (B,)
             cd_by_cate[cate].extend(cd.cpu().tolist())
 
             if not args.no_emd:
-                emd = earth_mover_distance(x0, recon)  # (B,)
+                emd = earth_mover_distance(x0_orig, recon_orig)  # (B,)
                 emd_by_cate[cate].extend(emd.cpu().tolist())
 
     # --- 打印结果表格（×10^3，与论文一致）---
