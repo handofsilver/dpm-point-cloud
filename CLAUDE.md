@@ -49,6 +49,17 @@ Built for understanding data flow and architecture correspondence to the paper �
 - **AutoEncoder**: PointNet → z → Diffusion decode. No KL term. T=200, β_T=0.05, lr=1e-3
 - **FlowVAE/GaussianVAE**: PointNet → (μ,σ) → z → Diffusion decode + KL(q||p). T=100, β_T=0.02, lr=2e-3, kl_weight=0.001
 
+### Paper Tables and Training Protocol
+
+Each row in the paper's result tables corresponds to **one independently trained checkpoint**. Reconstructed from released pretrained ckpts' `args` (see `pretrained/*.pt`, fields `model` and `categories`):
+
+- **Table 1 (Generation)** — FlowVAE only. Reports Airplane and Chair, each row is a per-category FlowVAE ckpt (`GEN_airplane.pt` / `GEN_chair.pt`, both with `model='flow'`). Evaluation normalizes both `S_g` and `S_r` into a `[-1, 1]^3` bbox before computing MMD / COV / 1-NNA / JSD (Sec 5.2).
+- **Table 2 (Auto-encoding)** — AutoEncoder. Reports Airplane, Car, Chair, ShapeNet: first three rows are per-category AE ckpts (`AE_airplane.pt` / `AE_car.pt` / `AE_chair.pt`); the ShapeNet row is the all-55 AE ckpt (`AE_all.pt`).
+- **GaussianVAE does not appear in any paper table.** It is a code-only ablation (fixed N(0,I) prior in place of the learned flow prior) for internal Flow-vs-Gaussian comparison.
+- The `train_*.py` scripts default to **all-55-category joint training**, which does not match any Table 1 row's protocol. Reproducing a Table 1 row requires per-category training via a `--cates` argument.
+
+Current reproduction status and next-step ablation plan: `docs/experiment/gen_eval_gap_analysis.md`, `docs/experiment/next_experiments.md`.
+
 ### Implementation Constraints
 - Data: ShapeNet point clouds, 2048 points/shape, normalized to zero mean and unit variance
 - Encoder outputs mu and log_var (not sigma) for numerical stability
