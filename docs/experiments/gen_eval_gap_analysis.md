@@ -1,9 +1,9 @@
 # Gen 评测与论文 Table 1 差距的排查
 
 > 记录"为什么 FlowVAE / GaussianVAE 在 Table 1 评测协议下的 COV / 1-NNA / JSD 与论文相差悬殊"的排查过程与归因。
-> 范围限定：仅针对 **生成任务（Table 1）**，不涉及 AE（Table 2 的 ~10× CD 差距归因见 [`dataset_investigation.md`](dataset_investigation.md)）。
+> 范围限定：仅针对 **生成任务（Table 1）**，不涉及 AE（Table 2 的 ~10× CD 差距归因见 [`ae_eval_gap_analysis.md`](ae_eval_gap_analysis.md)）。
 >
-> 第一轮完整训练 + 评测流程见 [`ae_training_and_eval.md`](ae_training_and_eval.md)；下一轮实验计划见 [`next_experiments.md`](next_experiments.md)。
+> 第一轮完整训练 + 评测流程见 [`1st_round_training_and_eval.md`](1st_round_training_and_eval.md)；下一轮实验计划见 [`next_experiments.md`](next_experiments.md)。
 
 ---
 
@@ -151,7 +151,7 @@ for name in ['AE_airplane.pt','AE_chair.pt','AE_car.pt','AE_all.pt',
 
 - 论文 pretrained 训练在 PC15k（15k pts/shape），本轮在 shapenet.hdf5（2048 pts/shape）
 - PC15k 本地不可得，数据集差异对生成质量的贡献**无法独立量化**
-- AE 调查（[`dataset_investigation.md`](dataset_investigation.md) §6）证明 AE 评测的 ~10× CD gap 主因是此项；生成任务里 bbox 归一化消除了坐标尺度差异，但点云密度（2048 vs 15000）对训练过程本身的影响仍是混淆变量
+- AE 调查（[`ae_eval_gap_analysis.md`](ae_eval_gap_analysis.md) §6）证明 AE 评测的 ~10× CD gap 主因是此项；生成任务里 bbox 归一化消除了坐标尺度差异，但点云密度（2048 vs 15000）对训练过程本身的影响仍是混淆变量
 
 ---
 

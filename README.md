@@ -232,9 +232,9 @@ Key implications:
 - Released `GEN_*.pt` / `AE_*.pt` were trained on `ShapeNetCore.v2.PC15k.Resplit` (15k points/shape, not included in the Google Drive release); this repo trains and evaluates on `shapenet.hdf5` (2048 points/shape).
 
 Current reproduction status and next-step ablation plan:
-- [`docs/experiment/ae_training_and_eval.md`](docs/experiment/ae_training_and_eval.md) — first-round training + evaluation report
-- [`docs/experiment/gen_eval_gap_analysis.md`](docs/experiment/gen_eval_gap_analysis.md) — Table 1 gap root-cause analysis
-- [`docs/experiment/next_experiments.md`](docs/experiment/next_experiments.md) — prioritized ablation plan
+- [`docs/experiments/1st_round_training_and_eval.md`](docs/experiments/1st_round_training_and_eval.md) — first-round training + evaluation report
+- [`docs/experiments/gen_eval_gap_analysis.md`](docs/experiments/gen_eval_gap_analysis.md) — Table 1 gap root-cause analysis
+- [`docs/experiments/next_experiments.md`](docs/experiments/next_experiments.md) — prioritized ablation plan
 
 ---
 
@@ -242,7 +242,7 @@ Current reproduction status and next-step ablation plan:
 
 > **Note on comparability**: The paper's released pretrained weights (e.g. `AE_all.pt`) were trained on `ShapeNetCore.v2.PC15k.Resplit` — this is directly confirmed from the checkpoint's `args.dataset_dir`. Paper Table 2's reported numbers most plausibly come from evaluating those same checkpoints on the same dataset's test split (the paper text doesn't name the eval file explicitly, but this is the natural reading since that's where the released weights came from). `ShapeNetCore.v2.PC15k.Resplit` is **not** included in the Google Drive release — only `shapenet.hdf5` (2048 points/shape, airplane per-shape std ≈ 0.115, measured) is. This repo trains and evaluates on `shapenet.hdf5`.
 >
-> We empirically verified — by running the paper's official `AE_all.pt` through our eval pipeline on `shapenet.hdf5` — that the ~10× AE CD gap is attributable to **the evaluation dataset, not training quality**. See [`docs/notes/dataset_investigation.md`](docs/notes/dataset_investigation.md) §5 for the decisive experiment and §6 for the mechanism. **Relative trends across categories are comparable; absolute values are not.**
+> We empirically verified — by running the paper's official `AE_all.pt` through our eval pipeline on `shapenet.hdf5` — that the ~10× AE CD gap is attributable to **the evaluation dataset, not training quality**. See [`docs/experiments/ae_eval_gap_analysis.md`](docs/experiments/ae_eval_gap_analysis.md) §5 for the decisive experiment and §6 for the mechanism. **Relative trends across categories are comparable; absolute values are not.**
 
 ### Table 2 — AutoEncoder Reconstruction
 
@@ -276,7 +276,7 @@ Paper units: CD ×10³, EMD ×10¹, JSD ×10³.
 | Airplane | 3.276  | 1.061   | 48.71      | 45.47       | 64.83        | 75.12         | 1.067 |
 | Chair    | 12.276 | 1.784   | 48.94      | 47.52       | 60.11        | 69.06         | 7.797 |
 
-> **Our Gen models are still training; results will be filled in when available.** Expected behavior (same mechanism as AE — see [investigation §7](docs/notes/dataset_investigation.md)):
+> **Our Gen models are still training; results will be filled in when available.** Expected behavior (same mechanism as AE — see [investigation §7](docs/experiments/ae_eval_gap_analysis.md)):
 > - **MMD-CD / MMD-EMD** — absolute distance metrics, will be systematically smaller than paper (same ~10× scale effect).
 > - **COV / 1-NNA** — ratio / classification metrics, scale-invariant, should land close to paper numbers.
 > - The paper's Table 1 protocol additionally normalizes both generated and reference point clouds into `[−1,1]³` bbox before computing metrics (Section 5.2, following ShapeGF). `scripts/eval_gen.py` does not currently do this — so MMD absolute values won't match paper even without the dataset-scale effect.

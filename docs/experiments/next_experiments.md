@@ -1,8 +1,8 @@
 # 下一步实验计划
 
-> 基于第一轮训练+评测（[`ae_training_and_eval.md`](ae_training_and_eval.md)）与 Gen 评测差距的排查（[`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)），本文档只列下一轮要跑的消融实验：目标、改动点、预期信号。**不重复前两份文档的事实与数据**。
+> 基于第一轮训练+评测（[`1st_round_training_and_eval.md`](1st_round_training_and_eval.md)）与 Gen 评测差距的排查（[`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)），本文档只列下一轮要跑的消融实验：目标、改动点、预期信号。**不重复前两份文档的事实与数据**。
 >
-> 范围限定：仅针对生成任务（Table 1）。AE 部分在 [`dataset_investigation.md`](dataset_investigation.md) 中已经完成归因（数据集差异 → 数量级不可比），没有后续实验计划。
+> 范围限定：仅针对生成任务（Table 1）。AE 部分在 [`ae_eval_gap_analysis.md`](ae_eval_gap_analysis.md) 中已经完成归因（数据集差异 → 数量级不可比），没有后续实验计划。
 
 ---
 
@@ -23,7 +23,7 @@
 | P2     | Flow 扩容至 14 层 / hidden 256  | 仅 FlowVAE 提升（GaussianVAE 不适用）                           | ↑（显存+算力）|
 | P3     | Encoder 加 BN、FC head 改三层   | 可能改善 latent 表达，收益未知                                  | 不变          |
 
-说明：P3 是原仓库结构，但当前仓库刻意选了简洁版作为学习读物（[`dataset_investigation.md`](dataset_investigation.md) §8.1）。仅在 P0-P2 都做完后仍有显著残差时才考虑。
+说明：P3 是原仓库结构，但当前仓库刻意选了简洁版作为学习读物（[`ae_eval_gap_analysis.md`](ae_eval_gap_analysis.md) §8.1）。仅在 P0-P2 都做完后仍有显著残差时才考虑。
 
 ---
 

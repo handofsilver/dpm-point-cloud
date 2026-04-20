@@ -3,7 +3,7 @@
 > 这份文档记录本仓库在服务器上完成的**第一轮完整训练 + 评测**全过程：硬件 / 软件环境、与 `environment.yml` 的偏差、训练命令、评测命令与结果。
 >
 > 相关专题另有文档，不在这里重复：
-> - AE 评测 CD 与论文 Table 2 相差 ~10× 的归因 → [`dataset_investigation.md`](dataset_investigation.md)
+> - AE 评测 CD 与论文 Table 2 相差 ~10× 的归因 → [`ae_eval_gap_analysis.md`](ae_eval_gap_analysis.md)
 > - Gen 评测 COV/1-NNA/JSD 与论文 Table 1 差距的排查 → [`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)
 > - 下一轮实验计划 → [`next_experiments.md`](next_experiments.md)
 > - 加载原仓库发布的 `AE_all.pt` 所需的兼容改动（不入主线，仅备查） → [`checkpoint_loading_restore.md`](checkpoint_loading_restore.md)
@@ -202,6 +202,6 @@ python scripts/eval_ae.py \
 | Chair    | 0.5521 | 2.7122 |
 | Car      | 0.5923 | 2.0631 |
 
-官方权重在 `shapenet.hdf5` 上的结果与我们自训（7.1）同一量级，都远低于论文 Table 2 —— 证明 gap 来自数据集而非训练质量。完整分析在 [`../notes/dataset_investigation.md`](../notes/dataset_investigation.md) §5–6。
+官方权重在 `shapenet.hdf5` 上的结果与我们自训（7.1）同一量级，都远低于论文 Table 2 —— 证明 gap 来自数据集而非训练质量。完整分析在 [`../experiments/ae_eval_gap_analysis.md`](../experiments/ae_eval_gap_analysis.md) §5–6。
 
 加载 `AE_all.pt` 需要在主线之外补一套"BN 编码器 + `var_sched` 长度 201→200"的兼容改动，这些改动**不会入主线仓库**，仅以补丁形式记录在 [`checkpoint_loading_restore.md`](checkpoint_loading_restore.md)，供需要时按文档还原。

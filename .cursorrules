@@ -71,7 +71,7 @@ Each row in the paper's result tables corresponds to **one independently trained
 - **GaussianVAE does not appear in any paper table.** It is a code-only ablation (fixed N(0,I) prior in place of the learned flow prior) for internal Flow-vs-Gaussian comparison.
 - The `train_*.py` scripts default to **all-55-category joint training**, which does not match any Table 1 row's protocol. Reproducing a Table 1 row requires per-category training via a `--cates` argument.
 
-Current reproduction status and next-step ablation plan: `docs/experiment/gen_eval_gap_analysis.md`, `docs/experiment/next_experiments.md`.
+Current reproduction status and next-step ablation plan: `docs/experiments/gen_eval_gap_analysis.md`, `docs/experiments/next_experiments.md`.
 
 ## Collaboration Mode: Scaffold → Fill-in → Review
 
