@@ -210,6 +210,34 @@ Additional notes:
 
 ---
 
+## Mapping Experiments to Paper Tables
+
+The paper reports two result tables, each requiring a specific training protocol. This mapping is reconstructed from the released pretrained checkpoints' `args` in `pretrained/*.pt` (fields `model` and `categories`, inspected via `torch.load(..., weights_only=False)['args']`):
+
+| Paper row | Task | Model | Training | Released ckpt |
+|---|---|---|---|---|
+| Table 1 — Airplane | Generation | FlowVAE | airplane-only | `GEN_airplane.pt` |
+| Table 1 — Chair | Generation | FlowVAE | chair-only | `GEN_chair.pt` |
+| Table 2 — Airplane | Auto-encoding | AutoEncoder | airplane-only | `AE_airplane.pt` |
+| Table 2 — Car | Auto-encoding | AutoEncoder | car-only | `AE_car.pt` |
+| Table 2 — Chair | Auto-encoding | AutoEncoder | chair-only | `AE_chair.pt` |
+| Table 2 — ShapeNet | Auto-encoding | AutoEncoder | all 55 categories | `AE_all.pt` |
+
+Key implications:
+
+- **Table 1 "Ours" uses FlowVAE, not GaussianVAE.** GaussianVAE does not appear in any paper table — it is a code-level ablation (fixed $\mathcal{N}(0, I)$ prior in place of the learned flow prior) for internal Flow-vs-Gaussian comparison only.
+- **Each paper row is one independently trained checkpoint** (6 distinct ckpts: 2 generation + 4 auto-encoding).
+- The `scripts/train_*.py` entry points currently default to **all-55-category joint training**, which does not match any Table 1 row's protocol. Reproducing a Table 1 row requires per-category training via a `--cates` argument.
+- Table 1 evaluation additionally normalizes both generated and reference point clouds into a $[-1, 1]^3$ bounding box before computing metrics (Sec 5.2, following ShapeGF). This is already implemented in `scripts/eval_gen.py`.
+- Released `GEN_*.pt` / `AE_*.pt` were trained on `ShapeNetCore.v2.PC15k.Resplit` (15k points/shape, not included in the Google Drive release); this repo trains and evaluates on `shapenet.hdf5` (2048 points/shape).
+
+Current reproduction status and next-step ablation plan:
+- [`docs/experiment/ae_training_and_eval.md`](docs/experiment/ae_training_and_eval.md) — first-round training + evaluation report
+- [`docs/experiment/gen_eval_gap_analysis.md`](docs/experiment/gen_eval_gap_analysis.md) — Table 1 gap root-cause analysis
+- [`docs/experiment/next_experiments.md`](docs/experiment/next_experiments.md) — prioritized ablation plan
+
+---
+
 ## Results vs. Paper
 
 > **Note on comparability**: The paper's released pretrained weights (e.g. `AE_all.pt`) were trained on `ShapeNetCore.v2.PC15k.Resplit` — this is directly confirmed from the checkpoint's `args.dataset_dir`. Paper Table 2's reported numbers most plausibly come from evaluating those same checkpoints on the same dataset's test split (the paper text doesn't name the eval file explicitly, but this is the natural reading since that's where the released weights came from). `ShapeNetCore.v2.PC15k.Resplit` is **not** included in the Google Drive release — only `shapenet.hdf5` (2048 points/shape, airplane per-shape std ≈ 0.115, measured) is. This repo trains and evaluates on `shapenet.hdf5`.
