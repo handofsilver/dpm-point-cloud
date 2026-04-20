@@ -60,6 +60,28 @@ def get_args():
     )
     parser.add_argument("--flow_layers", type=int, default=4, help="FlowVAE 的 Flow 层数")
     parser.add_argument("--flow_hidden_dim", type=int, default=128, help="Flow s/t 网络隐层宽度")
+    # --- per-category 训练（对齐 paper Table 1 GEN_*.pt 协议）---
+    parser.add_argument(
+        "--cates",
+        type=str,
+        nargs="+",
+        default=None,
+        help="类别列表（如 airplane chair），默认 None=全 55 类",
+    )
+    # --- LR schedule：plateau → 线性衰减 → 保持 end_lr（对齐 paper sched_start/sched_end/end_lr）---
+    parser.add_argument("--end_lr", type=float, default=1e-4, help="LR 衰减终点")
+    parser.add_argument(
+        "--sched_start_epoch",
+        type=int,
+        default=None,
+        help="plateau 结束的 epoch；默认 epochs // 2",
+    )
+    parser.add_argument(
+        "--sched_end_epoch",
+        type=int,
+        default=None,
+        help="线性衰减结束的 epoch；默认 epochs（之后保持 end_lr）",
+    )
     return parser.parse_args()
 
 
@@ -107,19 +129,35 @@ def train(args):
     print(f"使用设备: {device} | 模型: {args.model}")
 
     # --- 数据 ---
-    dataset = ShapeNetDataset(path=args.data_path, split="train")
+    dataset = ShapeNetDataset(path=args.data_path, split="train", cates=args.cates)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
+    print(f"训练数据: {len(dataset)} shapes | cates={args.cates or 'all 55'}")
 
     # --- 模型 ---
     model = build_model(args, device)
 
     # --- 优化器 & LR Scheduler ---
+    # 三段式 schedule（paper 协议）：
+    #   [0, sched_start)       plateau at args.lr
+    #   [sched_start, sched_end)  线性衰减 args.lr → args.end_lr
+    #   [sched_end, epochs]    保持 args.end_lr
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer,
-        start_factor=1.0,
-        end_factor=0.0,
-        total_iters=args.epochs,
+    sched_start = args.sched_start_epoch if args.sched_start_epoch is not None else args.epochs // 2
+    sched_end = args.sched_end_epoch if args.sched_end_epoch is not None else args.epochs
+    end_factor = args.end_lr / args.lr
+
+    def lr_lambda(epoch_idx: int) -> float:
+        if epoch_idx < sched_start:
+            return 1.0
+        if epoch_idx < sched_end:
+            progress = (epoch_idx - sched_start) / max(1, sched_end - sched_start)
+            return 1.0 - progress * (1.0 - end_factor)
+        return end_factor
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    print(
+        f"LR schedule: plateau [0, {sched_start}) lr={args.lr:.2e}, "
+        f"decay [{sched_start}, {sched_end}) → {args.end_lr:.2e}, then hold"
     )
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -149,7 +187,13 @@ def train(args):
         scheduler.step()
 
         if epoch % args.save_freq == 0:
-            ckpt_path = os.path.join(args.save_dir, f"{args.model}_epoch_{epoch:04d}.pt")
+            cates_tag = "_".join(args.cates) if args.cates else None
+            fname = (
+                f"{args.model}_{cates_tag}_epoch_{epoch:04d}.pt"
+                if cates_tag
+                else f"{args.model}_epoch_{epoch:04d}.pt"
+            )
+            ckpt_path = os.path.join(args.save_dir, fname)
             torch.save({"epoch": epoch, "model": model.state_dict(), "args": vars(args)}, ckpt_path)
             print(f"Checkpoint 保存至 {ckpt_path}")
 
