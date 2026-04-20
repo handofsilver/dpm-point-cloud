@@ -1,9 +1,11 @@
 # 训练与评测实验记录
 
-> 这份文档记录本仓库在服务器上完成的一次完整训练 + 评测全过程：硬件 / 软件环境、与 `environment.yml` 的偏差、训练命令、评测命令与结果。
+> 这份文档记录本仓库在服务器上完成的**第一轮完整训练 + 评测**全过程：硬件 / 软件环境、与 `environment.yml` 的偏差、训练命令、评测命令与结果。
 >
 > 相关专题另有文档，不在这里重复：
-> - 评测 CD 与论文 Table 2 相差 ~10× 的归因 → [`../notes/dataset_investigation.md`](../notes/dataset_investigation.md)
+> - AE 评测 CD 与论文 Table 2 相差 ~10× 的归因 → [`dataset_investigation.md`](dataset_investigation.md)
+> - Gen 评测 COV/1-NNA/JSD 与论文 Table 1 差距的排查 → [`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)
+> - 下一轮实验计划 → [`next_experiments.md`](next_experiments.md)
 > - 加载原仓库发布的 `AE_all.pt` 所需的兼容改动（不入主线，仅备查） → [`checkpoint_loading_restore.md`](checkpoint_loading_restore.md)
 
 ---
@@ -104,8 +106,8 @@ CUDA_VISIBLE_DEVICES=1 python scripts/train_gen.py \
 
 产出的 checkpoint（每 100 epoch 存一次）：
 - `checkpoints/ae/epoch_0100.pt … epoch_2000.pt`
-- `checkpoints/gen/gaussian_epoch_0100.pt … gaussian_epoch_1800.pt`
-- `checkpoints/gen/flow_epoch_0100.pt … flow_epoch_1800.pt`
+- `checkpoints/gen/gaussian_epoch_0100.pt … gaussian_epoch_2000.pt`
+- `checkpoints/gen/flow_epoch_0100.pt … flow_epoch_2000.pt`
 
 ## 7. 评测
 
@@ -130,14 +132,53 @@ python scripts/eval_ae.py \
 
 EMD 使用 `geomloss` Sinkhorn 近似（原仓库用 `approxmatch.cu` CUDA kernel，我们的环境不兼容），EMD 绝对值与论文不可直接比。
 
-### 7.2 Gen（Table 1）— 进行中
+### 7.2 Gen（Table 1）— 已完成
 
-训练已完成、checkpoint 已存（`checkpoints/gen/flow_epoch_1800.pt`、`gaussian_epoch_1800.pt` 等），评测**尚未跑**。评测前还有两处改动待加：
+评测前先补了两处与论文 Sec 5.2 协议对齐的改动（均已合入主线）：
 
-1. **补 JSD 指标** —— 之前 `metrics.py` 漏了 JSD（Jensen-Shannon Divergence between voxelized point cloud distributions），论文 Table 1 里有这一列。
-2. **加 `[-1, 1]³` bbox 归一化** —— 论文 Sec 5.2 要求 `S_g` 和 `S_r` 都先归一化到 bbox 再算 MMD / COV / 1-NNA / JSD，当前 `scripts/eval_gen.py` 没做。
+1. **JSD 指标**：在 `metrics.py` 新增 voxel 化点云分布之间的 Jensen–Shannon Divergence
+2. **`[-1, 1]³` bbox 归一化**：在 `scripts/eval_gen.py` 计算指标前对 `S_g` 和 `S_r` 各自做 per-shape bbox 归一化（commit 3b06280）
 
-两项改完后再跑评测。
+命令（FlowVAE / GaussianVAE 各跑一次）：
+
+```bash
+python scripts/eval_gen.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --ckpt checkpoints/gen/flow_epoch_2000.pt \
+    --model flow \
+    --cates airplane chair car \
+    --out_dir results/eval_gen
+
+python scripts/eval_gen.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --ckpt checkpoints/gen/gaussian_epoch_2000.pt \
+    --model gaussian \
+    --cates airplane chair car \
+    --out_dir results/eval_gen
+```
+
+**FlowVAE 结果**（bbox 归一化后）：
+
+| Category | MMD-CD   | COV-CD   | 1-NNA-CD | MMD-EMD  | COV-EMD  | 1-NNA-EMD | JSD      |
+|----------|----------|----------|----------|----------|----------|-----------|----------|
+| Airplane | 0.004911 | 0.133443 | 0.904448 | 0.035263 | 0.161450 | 0.920923  | 0.441765 |
+| Chair    | 0.016547 | 0.208291 | 0.847321 | 0.070243 | 0.213347 | 0.892316  | 0.104457 |
+| Car      | 0.005250 | 0.132576 | 0.963068 | 0.028005 | 0.151515 | 0.961174  | 0.396817 |
+
+**GaussianVAE 结果**：
+
+| Category | MMD-CD   | COV-CD   | 1-NNA-CD | MMD-EMD  | COV-EMD  | 1-NNA-EMD | JSD      |
+|----------|----------|----------|----------|----------|----------|-----------|----------|
+| Airplane | 0.005292 | 0.116969 | 0.927512 | 0.035894 | 0.146623 | 0.936573  | 0.435490 |
+| Chair    | 0.018547 | 0.174924 | 0.892316 | 0.077675 | 0.199191 | 0.928716  | 0.112781 |
+| Car      | 0.005460 | 0.151515 | 0.979167 | 0.031067 | 0.138258 | 0.979167  | 0.393697 |
+
+说明：
+- **bbox 归一化后指标本该与论文 Table 1 同量纲可比**，但 COV 明显偏低、1-NNA 明显偏高、JSD 整体偏大两到三个量级（airplane FlowVAE JSD 约 0.44，论文报告换算回去约 0.001）—— 分布质量远离论文水准
+- 论文 Table 1 只报 Airplane / Chair，Car 是我们额外加的（Table 1 里没有 Car 列，无对照基准）
+- GaussianVAE 在论文正文没有对应表格行（Table 1 "Ours" 对应的 `GEN_*.pt` ckpt 里 `model=flow`）；这里 GaussianVAE 仅作为 FlowVAE 的内部 ablation 参考
+- EMD 仍用 `geomloss` Sinkhorn 近似，EMD 绝对值与论文不直接可比
+- 完整差距分析与根因排查单独成篇：[`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)
 
 ## 8. 备注
 
