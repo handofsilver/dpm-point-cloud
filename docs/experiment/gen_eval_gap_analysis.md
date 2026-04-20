@@ -3,7 +3,7 @@
 > 记录"为什么 FlowVAE / GaussianVAE 在 Table 1 评测协议下的 COV / 1-NNA / JSD 与论文相差悬殊"的排查过程与归因。
 > 范围限定：仅针对 **生成任务（Table 1）**，不涉及 AE（Table 2 的 ~10× CD 差距归因见 [`dataset_investigation.md`](dataset_investigation.md)）。
 >
-> 第一轮完整训练 + 评测流程见 [`training_and_eval.md`](training_and_eval.md)；下一轮实验计划见 [`next_experiments.md`](next_experiments.md)。
+> 第一轮完整训练 + 评测流程见 [`ae_training_and_eval.md`](ae_training_and_eval.md)；下一轮实验计划见 [`next_experiments.md`](next_experiments.md)。
 
 ---
 

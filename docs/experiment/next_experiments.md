@@ -1,6 +1,6 @@
 # 下一步实验计划
 
-> 基于第一轮训练+评测（[`training_and_eval.md`](training_and_eval.md)）与 Gen 评测差距的排查（[`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)），本文档只列下一轮要跑的消融实验：目标、改动点、预期信号。**不重复前两份文档的事实与数据**。
+> 基于第一轮训练+评测（[`ae_training_and_eval.md`](ae_training_and_eval.md)）与 Gen 评测差距的排查（[`gen_eval_gap_analysis.md`](gen_eval_gap_analysis.md)），本文档只列下一轮要跑的消融实验：目标、改动点、预期信号。**不重复前两份文档的事实与数据**。
 >
 > 范围限定：仅针对生成任务（Table 1）。AE 部分在 [`dataset_investigation.md`](dataset_investigation.md) 中已经完成归因（数据集差异 → 数量级不可比），没有后续实验计划。
 
