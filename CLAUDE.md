@@ -29,7 +29,7 @@ Built for understanding data flow and architecture correspondence to the paper â
 
 ## Paper Context â€” DPM-3D (Luo & Hu 2021)
 
-- Reference repo: `/home/eliosilver/Github_Projects/diffusion-point-cloud` (read-only reference; reimplementation must be independent)
+- Reference repo: `/Users/eliosilver/regent/GitHub_Projects/diffusion-point-cloud` (read-only reference; reimplementation must be independent)
 - Detailed study notes: `docs/notes/`
 
 ### Core Concepts

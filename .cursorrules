@@ -5,7 +5,7 @@
 Personal paper-reading companion repo: simplified PyTorch implementations for understanding data flow and architecture correspondence to the original paper. NOT for production use.
 
 Paper: Luo & Hu, "Diffusion Probabilistic Models for 3D Point Cloud Generation", CVPR 2021
-Source reference repo: `/home/eliosilver/Github_Projects/diffusion-point-cloud` (read for understanding, do NOT copy-paste)
+Source reference repo: `/Users/eliosilver/regent/GitHub_Projects/diffusion-point-cloud` (read for understanding, do NOT copy-paste)
 Detailed study notes: `notes.md`
 
 ## Learner Context (CRITICAL — read before every response)
