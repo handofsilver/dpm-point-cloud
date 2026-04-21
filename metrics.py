@@ -8,6 +8,9 @@ JSD 来自 Achlioptas et al. 2018（原论文 [25]），把点云集合投影到
 28^3 体素占据直方图，再算 Jensen-Shannon Divergence。
 """
 
+import os
+from typing import Optional
+
 import numpy as np
 import torch
 from geomloss import SamplesLoss
@@ -209,14 +212,13 @@ def _unit_cube_grid(resolution: int, clip_sphere: bool = True) -> np.ndarray:
     Returns:
         coords: (G, 3)  网格中心坐标，G <= resolution^3
     """
-    spacing = 1.0 / float(resolution - 1)
     # 用 meshgrid 生成所有格子中心，坐标范围 [-0.5, 0.5]
     axes = np.linspace(-0.5, 0.5, resolution, dtype=np.float32)
     grid = np.stack(np.meshgrid(axes, axes, axes, indexing="ij"), axis=-1)  # (R, R, R, 3)
     coords = grid.reshape(-1, 3)  # (R^3, 3)
     if clip_sphere:
-        # 保留到原点距离 <= 0.5 的格子（与 bbox 内切球一致）
-        coords = coords[np.linalg.norm(coords, axis=1) <= 0.5 + spacing]
+        # 保留到原点距离 <= 0.5 的格子（与参考仓库严格阈值一致）
+        coords = coords[np.linalg.norm(coords, axis=1) <= 0.5]
     return coords  # (G, 3)
 
 
@@ -225,28 +227,25 @@ def _occupancy_distribution(
     grid_coords: np.ndarray,
 ) -> np.ndarray:
     """
-    给定点云集合，统计每个体素格子被多少个点云"碰到过"（Bernoulli 计数）。
+    给定点云集合，统计每个体素格子收到的总点数（point-level 直方图）。
 
-    每个点云对每个格子最多贡献 1（不是总点数，是命中该格的点云数），
-    这样得到的向量可以归一化为整个集合的空间占据概率分布。
+    每个点贡献 +1 到其最近格子；多个点落在同一格子会累加。与参考仓库
+    `entropy_of_occupancy_grid` 返回的 `grid_counters` 定义一致（JSD 喂入的就是该路）。
 
     Args:
         pcs:         (S, N, 3)  S 个点云，每个 N 点，坐标在 [-0.5, 0.5]^3
         grid_coords: (G, 3)    体素格中心（来自 _unit_cube_grid）
 
     Returns:
-        dist: (G,)  每格被命中的点云数（未归一化整数计数）
+        dist: (G,)  每格累计点数（S*N 个点整体投到 G 个格子上的直方图）
     """
-    # 在格子中心上建 kd-tree，查询"每个点属于哪个格子"
     nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree").fit(grid_coords)
 
     dist = np.zeros(len(grid_coords), dtype=np.float32)  # (G,)
 
     for pc in pcs:  # pc: (N, 3)
-        _, indices = nn.kneighbors(pc)  # indices: (N, 1) 每个点最近格子的编号
-        # unique：同一格子只计一次（Bernoulli，不是频率计数）
-        unique_indices = np.unique(indices)
-        dist[unique_indices] += 1
+        _, indices = nn.kneighbors(pc)  # (N, 1) 每个点最近格子的编号
+        np.add.at(dist, indices.ravel(), 1.0)
 
     return dist  # (G,)
 
@@ -309,12 +308,39 @@ def jsd_between_point_cloud_sets(
     return _jensen_shannon_div(P, Q)
 
 
+def _load_pairwise_if_match(
+    cache_path: str,
+    expected_shape: tuple,
+    device: torch.device,
+) -> Optional[dict]:
+    """
+    若 cache_path 存在且三块矩阵形状满足期望，则加载；否则返回 None。
+
+    expected_shape: (S, R)，用于校验 M_sr；M_rr 期望 (R, R)、M_ss 期望 (S, S)。
+    形状不匹配通常意味着 num_samples 或 num_points 改了，缓存失效。
+    """
+    if not os.path.exists(cache_path):
+        return None
+    data = torch.load(cache_path, map_location=device)
+    S, R = expected_shape
+    if data["sr"].shape != (S, R) or data["rr"].shape != (R, R) or data["ss"].shape != (S, S):
+        print(f"  缓存 {cache_path} 形状不符，忽略并重新计算")
+        return None
+    return data
+
+
+def _save_pairwise(cache_path: str, sr: torch.Tensor, rr: torch.Tensor, ss: torch.Tensor):
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    torch.save({"sr": sr.cpu(), "rr": rr.cpu(), "ss": ss.cpu()}, cache_path)
+
+
 def compute_all_metrics(
     sample_pcs: torch.Tensor,
     ref_pcs: torch.Tensor,
     batch_size: int = 64,
     use_emd: bool = True,
     use_jsd: bool = True,
+    cache_dir: Optional[str] = None,
 ) -> dict:
     """
     计算 Table 1 所需的全部集合级指标：
@@ -325,26 +351,55 @@ def compute_all_metrics(
         ref_pcs:    (R, N, 3)  参考集（测试集），已归一化到 [-1,1]^3
         batch_size: 成对 CD 计算的批大小
         use_emd:    是否同时计算 EMD 版指标（慢，调试时可设 False）
-        use_jsd:    是否计算 JSD（需要 _occupancy_distribution 实现完成）
+        use_jsd:    是否计算 JSD
+        cache_dir:  若给定，将成对 CD / EMD 距离矩阵缓存到该目录；
+                    下次调用时若 (S, R) 形状一致则直接加载、跳过重算。
+                    主要用于：JSD 代码改了重跑、MMD/COV/1-NNA 逻辑改了重跑时
+                    不必重新计算 pairwise EMD（这步最耗时）。
+                    缓存**不校验**生成样本是否同源 —— eval_gen.py 层面通过
+                    manifest.json 对生成样本做版本校验，调用方负责保持一致。
 
     Returns:
         dict，key 形如 "MMD-CD"、"COV-EMD"、"JSD" 等
     """
     results = {}
+    S, R = sample_pcs.size(0), ref_pcs.size(0)
+    device = sample_pcs.device
 
-    print("Computing pairwise CD...")
-    M_sr = _pairwise_cd(sample_pcs, ref_pcs, batch_size)
-    M_rr = _pairwise_cd(ref_pcs, ref_pcs, batch_size)
-    M_ss = _pairwise_cd(sample_pcs, sample_pcs, batch_size)
+    # --- Pairwise CD ---
+    cd_cache = os.path.join(cache_dir, "pairwise_cd.pt") if cache_dir else None
+    cached = _load_pairwise_if_match(cd_cache, (S, R), device) if cd_cache else None
+    if cached is not None:
+        print("Loading cached pairwise CD...")
+        M_sr, M_rr, M_ss = cached["sr"].to(device), cached["rr"].to(device), cached["ss"].to(device)
+    else:
+        print("Computing pairwise CD...")
+        M_sr = _pairwise_cd(sample_pcs, ref_pcs, batch_size)
+        M_rr = _pairwise_cd(ref_pcs, ref_pcs, batch_size)
+        M_ss = _pairwise_cd(sample_pcs, sample_pcs, batch_size)
+        if cd_cache:
+            _save_pairwise(cd_cache, M_sr, M_rr, M_ss)
     results.update(_mmd_cov_1nna(M_sr, M_rr, M_ss, suffix="CD"))
 
+    # --- Pairwise EMD ---
     if use_emd:
-        print("Computing pairwise EMD (slow)...")
-        M_sr_e = _pairwise_emd(sample_pcs, ref_pcs)
-        M_rr_e = _pairwise_emd(ref_pcs, ref_pcs)
-        M_ss_e = _pairwise_emd(sample_pcs, sample_pcs)
+        emd_cache = os.path.join(cache_dir, "pairwise_emd.pt") if cache_dir else None
+        cached = _load_pairwise_if_match(emd_cache, (S, R), device) if emd_cache else None
+        if cached is not None:
+            print("Loading cached pairwise EMD...")
+            M_sr_e = cached["sr"].to(device)
+            M_rr_e = cached["rr"].to(device)
+            M_ss_e = cached["ss"].to(device)
+        else:
+            print("Computing pairwise EMD (slow)...")
+            M_sr_e = _pairwise_emd(sample_pcs, ref_pcs)
+            M_rr_e = _pairwise_emd(ref_pcs, ref_pcs)
+            M_ss_e = _pairwise_emd(sample_pcs, sample_pcs)
+            if emd_cache:
+                _save_pairwise(emd_cache, M_sr_e, M_rr_e, M_ss_e)
         results.update(_mmd_cov_1nna(M_sr_e, M_rr_e, M_ss_e, suffix="EMD"))
 
+    # --- JSD（快，不缓存；代码若改动 cache 反而会误导） ---
     if use_jsd:
         print("Computing JSD...")
         results["JSD"] = jsd_between_point_cloud_sets(sample_pcs, ref_pcs)
