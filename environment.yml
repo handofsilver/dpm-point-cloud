@@ -19,3 +19,5 @@ dependencies:
     - tqdm
     # evaluation: EMD via Sinkhorn approximation (Phase 7)
     - geomloss
+    # dataset
+    - h5py
