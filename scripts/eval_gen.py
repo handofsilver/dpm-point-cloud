@@ -19,6 +19,7 @@
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -80,6 +81,16 @@ def get_args():
     parser.add_argument("--cd_batch_size", type=int, default=64, help="成对 CD 计算的批大小")
     parser.add_argument("--no_emd", action="store_true", help="跳过 EMD 版指标（调试用）")
     parser.add_argument("--out_dir", type=str, default="results/eval_gen")
+    parser.add_argument(
+        "--no_cache",
+        action="store_true",
+        help="禁用 {out_dir}/cache 下的中间结果缓存（生成样本 + 成对 CD/EMD 矩阵）",
+    )
+    parser.add_argument(
+        "--refresh_cache",
+        action="store_true",
+        help="忽略并覆盖已有缓存（比 --no_cache 更强：这次还会写新缓存）",
+    )
     return parser.parse_args()
 
 
@@ -126,6 +137,34 @@ def load_ref(data_path, cate, num_points) -> torch.Tensor:
     return torch.cat(pcs, dim=0)  # (R, N, 3)
 
 
+def _cache_manifest(args, cate: str, num_samples: int) -> dict:
+    """缓存版本标识：ckpt 改了 / 样本数改了 / 点数改了 都会让 manifest 不匹配，从而作废旧缓存。"""
+    return {
+        "ckpt_abspath": os.path.abspath(args.ckpt),
+        "ckpt_mtime": os.path.getmtime(args.ckpt),
+        "cate": cate,
+        "num_samples": num_samples,
+        "num_points": args.num_points,
+        "model": args.model,
+        "flexibility": args.flexibility,
+    }
+
+
+def _manifest_matches(cache_dir: str, expected: dict) -> bool:
+    path = os.path.join(cache_dir, "manifest.json")
+    if not os.path.exists(path):
+        return False
+    with open(path) as f:
+        saved = json.load(f)
+    return saved == expected
+
+
+def _write_manifest(cache_dir: str, manifest: dict):
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(os.path.join(cache_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+
+
 def main():
     args = get_args()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -154,8 +193,42 @@ def main():
 
         # 生成集大小默认与测试集相同（1-NNA 要求两集合等大）
         num_samples = args.num_samples if args.num_samples is not None else R
-        print(f"[{cate}] 从先验采样 {num_samples} 个形状...")
-        sample_pcs = sample_generated(model, num_samples, args, device)  # (S, N, 3)
+
+        # --- 缓存：sample_pcs + 成对矩阵 ---
+        # 结构：{out_dir}/cache/{cate}/{manifest.json, sample_pcs.pt, pairwise_cd.pt, pairwise_emd.pt}
+        # 只有 manifest 完全匹配时才会 reuse sample_pcs；不匹配或 --refresh_cache 时重新采样
+        # 成对矩阵缓存在 metrics.compute_all_metrics 内按 (S, R) 形状校验，见 metrics.py
+        cache_dir = None if args.no_cache else os.path.join(args.out_dir, "cache", cate)
+        manifest = _cache_manifest(args, cate, num_samples)
+
+        sample_cache_path = (
+            os.path.join(cache_dir, "sample_pcs.pt") if cache_dir is not None else None
+        )
+        can_reuse_sample = (
+            cache_dir is not None
+            and not args.refresh_cache
+            and os.path.exists(sample_cache_path)
+            and _manifest_matches(cache_dir, manifest)
+        )
+
+        if can_reuse_sample:
+            print(f"[{cate}] 复用缓存的生成样本：{sample_cache_path}")
+            sample_pcs = torch.load(sample_cache_path, map_location="cpu")
+        else:
+            print(f"[{cate}] 从先验采样 {num_samples} 个形状...")
+            sample_pcs = sample_generated(model, num_samples, args, device)  # (S, N, 3)
+            if cache_dir is not None:
+                # 新采样 → 写 manifest；任何旧的 pairwise_*.pt 缓存会在 metrics 层
+                # 通过形状校验作废；若形状恰好一致但内容不同步（refresh_cache 场景），
+                # 主动清掉以免假阳性
+                os.makedirs(cache_dir, exist_ok=True)
+                torch.save(sample_pcs, sample_cache_path)
+                _write_manifest(cache_dir, manifest)
+                if args.refresh_cache:
+                    for stale in ("pairwise_cd.pt", "pairwise_emd.pt"):
+                        p = os.path.join(cache_dir, stale)
+                        if os.path.exists(p):
+                            os.remove(p)
 
         print(f"[{cate}] 计算 MMD / COV / 1-NNA...")
         # 论文 Sec 5.2 协议：ref 和 gen 都归一化到 [-1,1]^3 bbox 再算指标
@@ -167,6 +240,7 @@ def main():
             ref_pcs=ref_pcs.to(device),
             batch_size=args.cd_batch_size,
             use_emd=not args.no_emd,
+            cache_dir=cache_dir,
         )
         all_results[cate] = results
 
