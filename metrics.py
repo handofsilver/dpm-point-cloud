@@ -212,13 +212,14 @@ def _unit_cube_grid(resolution: int, clip_sphere: bool = True) -> np.ndarray:
     Returns:
         coords: (G, 3)  网格中心坐标，G <= resolution^3
     """
+    spacing = 1.0 / float(resolution - 1)
     # 用 meshgrid 生成所有格子中心，坐标范围 [-0.5, 0.5]
     axes = np.linspace(-0.5, 0.5, resolution, dtype=np.float32)
     grid = np.stack(np.meshgrid(axes, axes, axes, indexing="ij"), axis=-1)  # (R, R, R, 3)
     coords = grid.reshape(-1, 3)  # (R^3, 3)
     if clip_sphere:
-        # 保留到原点距离 <= 0.5 的格子（与参考仓库严格阈值一致）
-        coords = coords[np.linalg.norm(coords, axis=1) <= 0.5]
+        # 保留到原点距离 <= 0.5 的格子（与 bbox 内切球一致）
+        coords = coords[np.linalg.norm(coords, axis=1) <= 0.5 + spacing]
     return coords  # (G, 3)
 
 
@@ -227,25 +228,28 @@ def _occupancy_distribution(
     grid_coords: np.ndarray,
 ) -> np.ndarray:
     """
-    给定点云集合，统计每个体素格子收到的总点数（point-level 直方图）。
+    给定点云集合，统计每个体素格子被多少个点云"碰到过"（Bernoulli 计数）。
 
-    每个点贡献 +1 到其最近格子；多个点落在同一格子会累加。与参考仓库
-    `entropy_of_occupancy_grid` 返回的 `grid_counters` 定义一致（JSD 喂入的就是该路）。
+    每个点云对每个格子最多贡献 1（不是总点数，是命中该格的点云数），
+    这样得到的向量可以归一化为整个集合的空间占据概率分布。
 
     Args:
         pcs:         (S, N, 3)  S 个点云，每个 N 点，坐标在 [-0.5, 0.5]^3
         grid_coords: (G, 3)    体素格中心（来自 _unit_cube_grid）
 
     Returns:
-        dist: (G,)  每格累计点数（S*N 个点整体投到 G 个格子上的直方图）
+        dist: (G,)  每格被命中的点云数（未归一化整数计数）
     """
+    # 在格子中心上建 kd-tree，查询"每个点属于哪个格子"
     nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree").fit(grid_coords)
 
     dist = np.zeros(len(grid_coords), dtype=np.float32)  # (G,)
 
     for pc in pcs:  # pc: (N, 3)
-        _, indices = nn.kneighbors(pc)  # (N, 1) 每个点最近格子的编号
-        np.add.at(dist, indices.ravel(), 1.0)
+        _, indices = nn.kneighbors(pc)  # indices: (N, 1) 每个点最近格子的编号
+        # unique：同一格子只计一次（Bernoulli，不是频率计数）
+        unique_indices = np.unique(indices)
+        dist[unique_indices] += 1
 
     return dist  # (G,)
 
