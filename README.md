@@ -114,21 +114,24 @@ python scripts/train_ae.py \
     --save_dir checkpoints/ae
 ```
 
-**Train generative model** (Table 1):
+**Train generative model** (Table 1). Paper's Table 1 "Ours" rows are **per-category** FlowVAE checkpoints, so reproduce by passing `--cates` (omit to default to all-55-category joint training, which does not match any Table 1 row):
 
 ```bash
-# GaussianVAE (simpler prior)
+# FlowVAE (learned prior, paper's main result) — per-category to match Table 1 protocol
 python scripts/train_gen.py \
     --data_path data/shapenet/shapenet.hdf5 \
-    --model gaussian \
-    --save_dir checkpoints/gen
-
-# FlowVAE (learned prior, paper's main result)
-python scripts/train_gen.py \
-    --data_path data/shapenet/shapenet.hdf5 \
+    --cates airplane \
     --model flow \
-    --save_dir checkpoints/gen
+    --epochs 20000 \
+    --batch_size 384
+
+# GaussianVAE (code-level ablation; not in paper tables)
+python scripts/train_gen.py \
+    --data_path data/shapenet/shapenet.hdf5 \
+    --model gaussian
 ```
+
+`train_gen.py` uses a three-phase LR schedule (plateau → linear decay → hold at `end_lr`) aligned with the paper's `sched_start / sched_end / end_lr`; see `--sched_start_epoch`, `--sched_end_epoch`, `--end_lr`.
 
 **Qualitative: reconstruct input point clouds**:
 
@@ -158,18 +161,20 @@ python scripts/eval_ae.py \
     --out_dir results/eval_ae
 ```
 
-**Quantitative: Table 1 — Generation quality (MMD / COV / 1-NNA)**:
+**Quantitative: Table 1 — Generation quality (MMD / COV / 1-NNA / JSD)**. `eval_gen.py` follows the paper's Sec 5.2 protocol: both $S_g$ and $S_r$ are normalized into the $[-1, 1]^3$ bounding box before computing metrics. Evaluate each per-category checkpoint separately:
 
 ```bash
 python scripts/eval_gen.py \
     --data_path data/shapenet/shapenet.hdf5 \
-    --ckpt checkpoints/gen/flow_epoch_2000.pt \
+    --ckpt checkpoints/gen/flow_airplane_epoch_20000.pt \
     --model flow \
-    --cates airplane chair car \
-    --out_dir results/eval_gen
+    --cates airplane \
+    --out_dir results/eval_gen_airplane
 ```
 
-> **Note on EMD**: both eval scripts use `geomloss` Sinkhorn approximation in place of the original `approxmatch.cu` CUDA kernel (incompatible with PyTorch 2.x / CUDA 13+). Both are approximate optimal transport solvers of comparable accuracy. Pass `--no_emd` to skip EMD computation during debugging.
+Sample generation + pairwise CD/EMD matrices are cached under `{out_dir}/cache/{cate}/` keyed by checkpoint mtime and config; pass `--refresh_cache` to invalidate or `--no_cache` to bypass caching.
+
+> **Note on EMD**: both eval scripts use `geomloss` Sinkhorn approximation in place of the original `approxmatch.cu` CUDA kernel (PyTorch 1.x-era CUDA extension; source code for the original kernel is no longer publicly available and the interface does not compile against PyTorch 2.x / CUDA 12+ toolchains). Sinkhorn systematically under-estimates true EMD due to entropic regularization, so **MMD-EMD absolute values are not directly comparable to the paper**; COV-EMD / 1-NNA-EMD are rank-based and remain directionally comparable. Full rationale: [`docs/experiments/emd_sinkhorn_decision.md`](docs/experiments/emd_sinkhorn_decision.md). Pass `--no_emd` to skip EMD during debugging.
 
 ---
 
@@ -231,10 +236,7 @@ Key implications:
 - Table 1 evaluation additionally normalizes both generated and reference point clouds into a $[-1, 1]^3$ bounding box before computing metrics (Sec 5.2, following ShapeGF). This is already implemented in `scripts/eval_gen.py`.
 - Released `GEN_*.pt` / `AE_*.pt` were trained on `ShapeNetCore.v2.PC15k.Resplit` (15k points/shape, not included in the Google Drive release); this repo trains and evaluates on `shapenet.hdf5` (2048 points/shape).
 
-Current reproduction status and next-step ablation plan:
-- [`docs/experiments/1st_round_training_and_eval.md`](docs/experiments/1st_round_training_and_eval.md) — first-round training + evaluation report
-- [`docs/experiments/gen_eval_gap_analysis.md`](docs/experiments/gen_eval_gap_analysis.md) — Table 1 gap root-cause analysis
-- [`docs/experiments/next_experiments.md`](docs/experiments/next_experiments.md) — prioritized ablation plan
+Current reproduction status and next-step ablation plan — see the index at [`docs/experiments/README.md`](docs/experiments/README.md) for the full timeline and inter-doc structure.
 
 ---
 
@@ -267,21 +269,32 @@ Paper units: CD ×10³, EMD ×10². Our units: CD ×10³, EMD ×10³ (Sinkhorn a
 
 The official weights (rightmost column) give the same order of magnitude as our self-trained model on `shapenet.hdf5`, while both are ~10× smaller than paper Table 2 — ruling out undertraining and pinning the gap to the dataset.
 
-### Table 1 — Generation Quality (in progress)
+### Table 1 — Generation Quality
 
-Paper units: CD ×10³, EMD ×10¹, JSD ×10³.
+Two training rounds, each fully documented under `docs/experiments/`; this README keeps only the headline numbers.
 
-| Category | MMD-CD | MMD-EMD | COV-CD (%) | COV-EMD (%) | 1-NNA-CD (%) | 1-NNA-EMD (%) | JSD   |
-|----------|--------|---------|------------|-------------|--------------|---------------|-------|
-| Airplane | 3.276  | 1.061   | 48.71      | 45.47       | 64.83        | 75.12         | 1.067 |
-| Chair    | 12.276 | 1.784   | 48.94      | 47.52       | 60.11        | 69.06         | 7.797 |
+**Round 1** — all-55-category joint FlowVAE / GaussianVAE (pre-[`--cates`](scripts/train_gen.py) support), evaluated on the three Table 1 categories. Numbers landed far from paper water level; primary cause turned out to be the training-protocol mismatch (Table 1 is per-category). Results and root-cause analysis: [`docs/experiments/1st_round_training_and_eval.md`](docs/experiments/1st_round_training_and_eval.md) §7.2, [`docs/experiments/gen_eval_gap_analysis.md`](docs/experiments/gen_eval_gap_analysis.md). Not reproduced here to avoid superseded numbers.
 
-> **Our Gen models are still training; results will be filled in when available.** Expected behavior (same mechanism as AE — see [investigation §7](docs/experiments/ae_eval_gap_analysis.md)):
-> - **MMD-CD / MMD-EMD** — absolute distance metrics, will be systematically smaller than paper (same ~10× scale effect).
-> - **COV / 1-NNA** — ratio / classification metrics, scale-invariant, should land close to paper numbers.
-> - The paper's Table 1 protocol additionally normalizes both generated and reference point clouds into `[−1,1]³` bbox before computing metrics (Section 5.2, following ShapeGF). `scripts/eval_gen.py` does not currently do this — so MMD absolute values won't match paper even without the dataset-scale effect.
+**Round 2** — per-category FlowVAE (`--cates airplane` / `--cates chair`) + plateau/decay LR schedule, 20000 epochs. Paper numbers restored to original scale (paper reports CD ×10³, EMD ×10¹, JSD ×10³).
 
-> **EMD note**: the paper uses the CUDA `approxmatch.cu` kernel (from PC-GAN); this repo uses `geomloss` Sinkhorn approximation for PyTorch 2.x compatibility. Both are approximate optimal transport solvers but produce systematically different values — EMD numbers are not directly comparable.
+**FlowVAE — Airplane**:
+
+| Source          | MMD-CD       | COV-CD     | 1-NNA-CD   | MMD-EMD       | COV-EMD    | 1-NNA-EMD  | JSD         |
+|-----------------|--------------|------------|------------|---------------|------------|------------|-------------|
+| Paper Table 1   | 0.003276     | 48.71%     | 64.83%     | 0.1061        | 45.47%     | 75.12%     | 0.001067    |
+| Ours (Round 2)  | **0.003389** | **48.76%** | **70.18%** | 0.02353†      | **43.99%** | **76.69%** | 0.01106‡    |
+
+**FlowVAE — Chair**:
+
+| Source          | MMD-CD       | COV-CD     | 1-NNA-CD   | MMD-EMD       | COV-EMD    | 1-NNA-EMD  | JSD         |
+|-----------------|--------------|------------|------------|---------------|------------|------------|-------------|
+| Paper Table 1   | 0.012276     | 48.94%     | 60.11%     | 0.1784        | 47.52%     | 69.06%     | 0.007797    |
+| Ours (Round 2)  | **0.012761** | **47.22%** | **61.43%** | 0.05542†      | **44.19%** | **69.57%** | 0.01084‡    |
+
+† MMD-EMD absolute values are not directly comparable: paper uses `approxmatch.cu`, this repo uses `geomloss` Sinkhorn, which systematically under-estimates true EMD. See [`docs/experiments/emd_sinkhorn_decision.md`](docs/experiments/emd_sinkhorn_decision.md).
+‡ JSD residual decomposes into a `shapenet.hdf5`-intrinsic data floor (~0.007; airplane train/test JSD with zero model) + model residual (~0.004). See [`docs/experiments/jsd_gap_analysis.md`](docs/experiments/jsd_gap_analysis.md).
+
+Full Round 2 details — commands, LR schedule, iter-count alignment, per-metric analysis: [`docs/experiments/2nd_round_training_and_eval.md`](docs/experiments/2nd_round_training_and_eval.md).
 
 ## Citation
 
