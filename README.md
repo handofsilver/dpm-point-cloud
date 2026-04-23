@@ -294,6 +294,17 @@ Two training rounds, each fully documented under `docs/experiments/`; this READM
 † MMD-EMD absolute values are not directly comparable: paper uses `approxmatch.cu`, this repo uses `geomloss` Sinkhorn, which systematically under-estimates true EMD. See [`docs/experiments/emd_sinkhorn_decision.md`](docs/experiments/emd_sinkhorn_decision.md).
 ‡ JSD residual decomposes into a `shapenet.hdf5`-intrinsic data floor (~0.007; airplane train/test JSD with zero model) + model residual (~0.004). See [`docs/experiments/jsd_gap_analysis.md`](docs/experiments/jsd_gap_analysis.md).
 
+**FlowVAE vs GaussianVAE ablation** — GaussianVAE trained under the same Round 2 protocol (per-category, same LR schedule / epochs / batch size):
+
+| Category | Model | MMD-CD | COV-CD | 1-NNA-CD | JSD |
+|---|---|---|---|---|---|
+| Airplane | **FlowVAE** | **0.003389** | **48.76%** | **70.18%** | **0.01106** |
+| Airplane | GaussianVAE | 0.003484 | 48.93% | 70.76% | 0.01329 |
+| Chair | **FlowVAE** | **0.012761** | **47.22%** | **61.43%** | **0.01084** |
+| Chair | GaussianVAE | 0.013336 | 43.07% | 66.84% | 0.01403 |
+
+FlowVAE consistently outperforms GaussianVAE — most visibly on chair (COV-CD +4 pt, 1-NNA-CD -5 pt, JSD -29%). The modest gap reflects our smaller Flow (4 layers / hidden 128 vs paper's 14 / 256); a larger Flow would possibly amplify the separation.
+
 Full Round 2 details — commands, LR schedule, iter-count alignment, per-metric analysis: [`docs/experiments/2nd_round_training_and_eval.md`](docs/experiments/2nd_round_training_and_eval.md).
 
 ## Citation
