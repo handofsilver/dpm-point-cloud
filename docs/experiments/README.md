@@ -14,7 +14,7 @@
 | 工程决策 | [`emd_sinkhorn_decision.md`](emd_sinkhorn_decision.md) | EMD 用 Sinkhorn 代替 approxmatch | 论文 `approxmatch.cu` 原码已失传 + PyTorch 2.x / CUDA 12 不兼容，改用 `geomloss` Sinkhorn；MMD-EMD 绝对值与论文不可比，COV-EMD / 1-NNA-EMD 方向性可比 |
 | 工程备份 | [`checkpoint_loading_restore.md`](checkpoint_loading_restore.md) | 加载官方 `AE_all.pt` 的兼容补丁 | 原仓库 Encoder 带 BN、`var_sched` 长度 201 与本仓库简化实现不一致；补丁仅用于官方 ckpt 复现实验，不入主线 |
 | Round 2 规划 | [`next_experiments.md`](next_experiments.md) | Round 2 消融计划 | 列出 P0（per-category 训练）/ P1（LR schedule 两段式）/ P2（Flow 扩容）/ P3（Encoder BN）四项，定优先级与预期信号 |
-| Round 2 实验记录 | [`2nd_round_training_and_eval.md`](2nd_round_training_and_eval.md) | Round 2 per-category + LR schedule | 合并 P0 + P1 执行一轮 airplane / chair FlowVAE 训练；airplane 评测已出，CD 列基本对齐论文、EMD 方向性对齐、JSD 余 0.010 量级 |
+| Round 2 实验记录 | [`2nd_round_training_and_eval.md`](2nd_round_training_and_eval.md) | Round 2 per-category + LR schedule + ablation | 合并 P0 + P1 执行 airplane / chair FlowVAE 训练，CD 基本对齐论文；同协议 GaussianVAE 对照验证 FlowVAE > GaussianVAE 方向性成立 |
 | Round 2 归因 | [`jsd_gap_analysis.md`](jsd_gap_analysis.md) | Table 1 JSD 列 gap 拆分 | 纯数据 oracle 实验证明 `shapenet.hdf5` airplane train/test JSD 下限 ~0.007（论文 PC15k 下限 0.000809，差 8.6×）；实测 0.011 = 0.007 数据下限 + 0.004 模型残差 |
 
 ---
